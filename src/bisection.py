@@ -79,7 +79,7 @@ def bisection(
     # Input validation
     if not (0 < alpha < 1):
         raise ValueError("Alpha must be between 0 and 1 (exclusive)")
-    if left_border >= right_border:
+    if left_border > right_border:
         raise ValueError("Left border must be less than right border")
     if rows != len(vector_weights) or rows != len(vector_in):
         raise ValueError("Rows must match the length of vector_weights and vector_in")

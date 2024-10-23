@@ -8,17 +8,18 @@ import warnings
 # TODO: Some of these tests fail. Need to fix this.
 @pytest.fixture(autouse=True)
 def mock_imports(monkeypatch):
+    import numpy as np
     def mock_lambda_max(*args, **kwargs):
         return 1.0
 
     def mock_lasso(*args, **kwargs):
-        return {"result": "lasso", "lambda_values": [1.0]}
+        return {"result": "lasso", "lambda_values": [1.0], "beta": np.zeros(2)}
 
     def mock_group_lasso(*args, **kwargs):
-        return {"result": "group_lasso", "lambda_values": [1.0]}
+        return {"result": "group_lasso", "lambda_values": [1.0], "beta": np.zeros(2)}
 
     def mock_sparse_group_lasso(*args, **kwargs):
-        return {"result": "sparse_group_lasso", "lambda_values": [1.0]}
+        return {"result": "sparse_group_lasso", "lambda_values": [1.0], "beta": np.zeros(2)}
 
     monkeypatch.setattr("lambda_max_lasso.lambda_max_lasso", mock_lambda_max)
     monkeypatch.setattr("lambda_max_group_lasso.lambda_max_group_lasso", mock_lambda_max)

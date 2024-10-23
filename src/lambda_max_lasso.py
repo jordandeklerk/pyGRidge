@@ -55,7 +55,7 @@ def lambda_max_lasso(y, feature_weights, beta, X):
 
     num_zeros_weights = np.sum(feature_weights == 0)
 
-    x_transp_residual_active = np.zeros(p)
+    x_transp_residual_active = np.zeros(p, dtype=np.float64)
 
     if num_zeros_weights > 0:
         # Treatment if unpenalized features are involved
