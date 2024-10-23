@@ -1,3 +1,5 @@
+"""Main function to run lasso, group lasso, or sparse-group lasso."""
+
 import numpy as np
 import warnings
 from ..src.lambda_max_lasso import lambda_max_lasso
