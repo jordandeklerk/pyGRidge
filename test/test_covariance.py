@@ -21,9 +21,6 @@ from ..src.covariance_design import (
 from ..src.groupedfeatures import GroupedFeatures
 
 
-# ------------------------------
-# Tests for DiscreteNonParametric
-# ------------------------------
 def test_discrete_non_parametric_valid():
     """Test valid initialization of DiscreteNonParametric."""
     eigs = [1.0, 2.0, 3.0]
@@ -69,9 +66,6 @@ def test_discrete_non_parametric_negative_probs():
         DiscreteNonParametric(eigs=[1.0, 2.0], probs=[0.7, -0.7])
 
 
-# ------------------------------
-# Tests for AR1Design
-# ------------------------------
 def test_ar1_design_valid():
     """Test valid initialization of AR1Design."""
     p = 5
@@ -120,9 +114,6 @@ def test_ar1_design_missing_p():
         ar1.get_Sigma()
 
 
-# ------------------------------
-# Tests for IdentityCovarianceDesign
-# ------------------------------
 def test_identity_covariance_design_valid():
     """Test valid initialization of IdentityCovarianceDesign."""
     p = 4
@@ -160,9 +151,6 @@ def test_identity_covariance_design_missing_p():
         identity.spectrum()
 
 
-# ------------------------------
-# Tests for UniformScalingCovarianceDesign
-# ------------------------------
 def test_uniform_scaling_covariance_design_valid():
     """Test valid initialization of UniformScalingCovarianceDesign."""
     p = 3
@@ -203,9 +191,6 @@ def test_uniform_scaling_covariance_design_invalid_p_value():
         UniformScalingCovarianceDesign(scaling=1.0, p=0)
 
 
-# ------------------------------
-# Tests for ExponentialOrderStatsCovarianceDesign
-# ------------------------------
 def test_exponential_order_stats_covariance_design_valid():
     """Test valid initialization of ExponentialOrderStatsCovarianceDesign."""
     p = 4
@@ -255,9 +240,6 @@ def test_exponential_order_stats_covariance_design_missing_p():
         exp_design.nfeatures()
 
 
-# ------------------------------
-# Tests for BlockDiagonal
-# ------------------------------
 def test_block_diagonal_valid():
     """Test valid initialization of BlockDiagonal."""
     block1 = np.array([[1, 0], [0, 1]])
@@ -295,9 +277,6 @@ def test_block_diagonal_non_square_blocks():
         BlockDiagonal(blocks=[np.array([[1, 2, 3]]), np.array([[4, 5], [6, 7]])])
 
 
-# ------------------------------
-# Tests for MixtureModel
-# ------------------------------
 def test_mixture_model_valid():
     """Test valid initialization of MixtureModel."""
     eigs1 = [1.0, 2.0]
@@ -360,9 +339,6 @@ def test_mixture_model_negative_mixing_prop():
         MixtureModel(spectra=[spectrum], mixing_prop=[-0.5, 1.5])
 
 
-# ------------------------------
-# Tests for BlockCovarianceDesign
-# ------------------------------
 def test_block_covariance_design_valid():
     """Test valid initialization of BlockCovarianceDesign."""
     # Create covariance designs
@@ -459,9 +435,6 @@ def test_block_covariance_design_spectrum_sum_not_one():
         block_design.spectrum()
 
 
-# ------------------------------
-# Tests for block_diag function
-# ------------------------------
 def test_block_diag_valid():
     """Test valid block diagonal construction."""
     A = np.array([[1, 0], [0, 1]])
@@ -519,9 +492,6 @@ def test_block_diag_exception_handling():
             Sigma = block_diag_obj.get_Sigma()
 
 
-# ------------------------------
-# Tests for simulate_rotated_design
-# ------------------------------
 def test_simulate_rotated_design_valid():
     """Test valid simulation of rotated design."""
     p = 3
@@ -621,9 +591,6 @@ def test_simulate_rotated_design_rotated_measure_shape_mismatch():
         simulate_rotated_design(cov=ar1, n=5, rotated_measure=faulty_measure)
 
 
-# ------------------------------
-# Tests for set_groups
-# ------------------------------
 def test_set_groups_with_GroupedFeatures_non_BlockCovarianceDesign():
     """Test setting groups with GroupedFeatures for non-BlockCovarianceDesign."""
     groups = GroupedFeatures(ps=[2, 3])

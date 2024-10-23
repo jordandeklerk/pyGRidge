@@ -7,6 +7,7 @@ from ..src.lasso import lasso
 from ..src.group_lasso import group_lasso
 from ..src.sparse_group_lasso import sparse_group_lasso
 
+
 def seagull(
     y,
     X=None,
@@ -20,7 +21,7 @@ def seagull(
     loops_lambda=50,
     max_iter=1000,
     gamma_bls=0.8,
-    trace_progress=False
+    trace_progress=False,
 ):
     r"""Mixed model fitting with lasso, group lasso, or sparse-group lasso regularization.
 
@@ -76,17 +77,21 @@ def seagull(
     Here, :math:`\beta` are the fixed effects, :math:`u` are the random effects,
     :math:`G` is the number of groups, and :math:`p_g` is the size of group :math:`g`.
     """
-    
+
     # Helper function to check if input is numeric
     def is_numeric(arr):
-        return isinstance(arr, (list, np.ndarray)) and np.issubdtype(np.array(arr).dtype, np.number)
+        return isinstance(arr, (list, np.ndarray)) and np.issubdtype(
+            np.array(arr).dtype, np.number
+        )
 
     # Check vector y
     if y is None:
         raise ValueError("Vector y is missing. Please provide y and try again.")
     y = np.asarray(y)
     if y.size == 0:
-        raise ValueError("Vector y is empty. Please provide a non-empty y and try again.")
+        raise ValueError(
+            "Vector y is empty. Please provide a non-empty y and try again."
+        )
     if y.ndim > 1 and not (y.shape[0] == 1 or y.shape[1] == 1):
         raise ValueError("Input y should be a one-dimensional array.")
     if not np.issubdtype(y.dtype, np.number):
@@ -118,7 +123,9 @@ def seagull(
         raise ValueError("Input Z should be a two-dimensional array")
     p2 = Z.shape[1]
     if Z.size == 0:
-        raise ValueError("Matrix Z is empty. Please provide a non-empty Z and try again.")
+        raise ValueError(
+            "Matrix Z is empty. Please provide a non-empty Z and try again."
+        )
     if Z.shape[0] != y.size:
         raise ValueError("Mismatching dimensions of vector y and matrix Z.")
     if np.any(np.isnan(Z)) or np.any(np.isinf(Z)):
@@ -148,17 +155,24 @@ def seagull(
         try:
             alpha = float(alpha)
         except (TypeError, ValueError):
-            warnings.warn("The parameter alpha is non-numeric. Reset to default value (=0.9).")
+            warnings.warn(
+                "The parameter alpha is non-numeric. Reset to default value (=0.9)."
+            )
             alpha = 0.9
         else:
             if not (0.0 <= alpha <= 1.0):
-                warnings.warn("The parameter alpha is out of range. Reset to default value (=1.0).")
+                warnings.warn(
+                    "The parameter alpha is out of range. Reset to default value"
+                    " (=1.0)."
+                )
                 alpha = 1.0  # Changed from 0.9 to 1.0
 
     # Check groups only if 0 <= alpha < 1
     if 0 <= alpha < 1.0:
         if groups is None:
-            raise ValueError("Vector groups is missing. Please provide groups when 0 <= alpha < 1.")
+            raise ValueError(
+                "Vector groups is missing. Please provide groups when 0 <= alpha < 1."
+            )
         if not is_numeric(groups):
             raise ValueError("Non-numeric values detected in vector groups.")
         groups = np.asarray(groups)
@@ -170,19 +184,27 @@ def seagull(
         if np.any(np.isnan(groups)) or np.any(np.isinf(groups)):
             raise ValueError("NA, NaN, or Inf detected in vector groups.")
 
-     # Check rel_acc
+    # Check rel_acc
     if rel_acc is None:
-        warnings.warn("The parameter rel_acc is None. Reset to default value (=0.0001).")
+        warnings.warn(
+            "The parameter rel_acc is None. Reset to default value (=0.0001)."
+        )
         rel_acc = 0.0001
     else:
         try:
             rel_acc = float(rel_acc)
         except (TypeError, ValueError):
-            warnings.warn("The parameter rel_acc is non-numeric. Reset to default value (=0.0001).")
+            warnings.warn(
+                "The parameter rel_acc is non-numeric. Reset to default value"
+                " (=0.0001)."
+            )
             rel_acc = 0.0001
         else:
             if rel_acc <= 0.0:
-                warnings.warn("The parameter rel_acc is non-positive. Reset to default value (=0.0001).")
+                warnings.warn(
+                    "The parameter rel_acc is non-positive. Reset to default value"
+                    " (=0.0001)."
+                )
                 rel_acc = 0.0001
 
     # Check max_iter
@@ -193,11 +215,16 @@ def seagull(
         try:
             max_iter = int(max_iter)
         except (TypeError, ValueError):
-            warnings.warn("The parameter max_iter is non-numeric. Reset to default value (=1000).")
+            warnings.warn(
+                "The parameter max_iter is non-numeric. Reset to default value (=1000)."
+            )
             max_iter = 1000
         else:
             if max_iter <= 0:
-                warnings.warn("The parameter max_iter is non-positive. Reset to default value (=1000).")
+                warnings.warn(
+                    "The parameter max_iter is non-positive. Reset to default value"
+                    " (=1000)."
+                )
                 max_iter = 1000
 
     # Check gamma_bls
@@ -208,11 +235,16 @@ def seagull(
         try:
             gamma_bls = float(gamma_bls)
         except (TypeError, ValueError):
-            warnings.warn("The parameter gamma_bls is non-numeric. Reset to default value (=0.8).")
+            warnings.warn(
+                "The parameter gamma_bls is non-numeric. Reset to default value (=0.8)."
+            )
             gamma_bls = 0.8
         else:
             if not (0.0 < gamma_bls < 1.0):
-                warnings.warn("The parameter gamma_bls is out of range. Reset to default value (=0.8).")
+                warnings.warn(
+                    "The parameter gamma_bls is out of range. Reset to default value"
+                    " (=0.8)."
+                )
                 gamma_bls = 0.8
 
     # Create correct input
@@ -230,7 +262,7 @@ def seagull(
     b_tilde = np.zeros(p)
 
     # Initialize index_permutation as identity permutation
-    index_permutation = np.arange(1, p + 1)  
+    index_permutation = np.arange(1, p + 1)
 
     if 0 <= alpha < 1.0:
         # Assign all fixed effects to one group if not assigned
@@ -242,7 +274,7 @@ def seagull(
         if min_group <= 0:
             groups = groups - min_group + 1
         # Sort by group number
-        index_permutation = np.argsort(groups) + 1  
+        index_permutation = np.argsort(groups) + 1
         if p > 1:
             X_tilde = X_tilde[:, index_permutation - 1]
             groups = groups[index_permutation - 1]
@@ -257,29 +289,47 @@ def seagull(
         if alpha == 1.0:
             max_lambda = lambda_max_lasso(y, weights_u_tilde, b_tilde, X_tilde)
         elif alpha == 0.0:
-            max_lambda = lambda_max_group_lasso(y, groups, weights_u_tilde, b_tilde, X_tilde)
+            max_lambda = lambda_max_group_lasso(
+                y, groups, weights_u_tilde, b_tilde, X_tilde
+            )
         else:
-            max_lambda = lambda_max_sparse_group_lasso(alpha, y, groups, weights_u_tilde, b_tilde, X_tilde)
+            max_lambda = lambda_max_sparse_group_lasso(
+                alpha, y, groups, weights_u_tilde, b_tilde, X_tilde
+            )
     else:
         try:
             max_lambda = float(max_lambda)
         except (TypeError, ValueError):
-            warnings.warn("The parameter max_lambda is non-numeric. Using default algorithm to calculate max_lambda.")
+            warnings.warn(
+                "The parameter max_lambda is non-numeric. Using default algorithm to"
+                " calculate max_lambda."
+            )
             if alpha == 1.0:
                 max_lambda = lambda_max_lasso(y, weights_u_tilde, b_tilde, X_tilde)
             elif alpha == 0.0:
-                max_lambda = lambda_max_group_lasso(y, groups, weights_u_tilde, b_tilde, X_tilde)
+                max_lambda = lambda_max_group_lasso(
+                    y, groups, weights_u_tilde, b_tilde, X_tilde
+                )
             else:
-                max_lambda = lambda_max_sparse_group_lasso(alpha, y, groups, weights_u_tilde, b_tilde, X_tilde)
+                max_lambda = lambda_max_sparse_group_lasso(
+                    alpha, y, groups, weights_u_tilde, b_tilde, X_tilde
+                )
         else:
             if max_lambda <= 0.0 or np.isnan(max_lambda) or np.isinf(max_lambda):
-                warnings.warn("The parameter max_lambda is invalid. Using default algorithm to calculate max_lambda.")
+                warnings.warn(
+                    "The parameter max_lambda is invalid. Using default algorithm to"
+                    " calculate max_lambda."
+                )
                 if alpha == 1.0:
                     max_lambda = lambda_max_lasso(y, weights_u_tilde, b_tilde, X_tilde)
                 elif alpha == 0.0:
-                    max_lambda = lambda_max_group_lasso(y, groups, weights_u_tilde, b_tilde, X_tilde)
+                    max_lambda = lambda_max_group_lasso(
+                        y, groups, weights_u_tilde, b_tilde, X_tilde
+                    )
                 else:
-                    max_lambda = lambda_max_sparse_group_lasso(alpha, y, groups, weights_u_tilde, b_tilde, X_tilde)
+                    max_lambda = lambda_max_sparse_group_lasso(
+                        alpha, y, groups, weights_u_tilde, b_tilde, X_tilde
+                    )
 
     # Check xi
     if xi is None:
@@ -289,35 +339,52 @@ def seagull(
         try:
             xi = float(xi)
         except (TypeError, ValueError):
-            warnings.warn("The parameter xi is non-numeric. Reset to default value (=0.01).")
+            warnings.warn(
+                "The parameter xi is non-numeric. Reset to default value (=0.01)."
+            )
             xi = 0.01
         else:
             if not (0.0 < xi <= 1.0):
-                warnings.warn("The parameter xi is out of range. Reset to default value (=0.01).")
+                warnings.warn(
+                    "The parameter xi is out of range. Reset to default value (=0.01)."
+                )
                 xi = 0.01
 
     # Check loops_lambda
     if xi == 1.0:
-        warnings.warn("Since the parameter xi = 1, the parameter loops_lambda will be set to 1.")
+        warnings.warn(
+            "Since the parameter xi = 1, the parameter loops_lambda will be set to 1."
+        )
         loops_lambda = 1
     else:
         if loops_lambda is None:
-            warnings.warn("The parameter loops_lambda is None. Reset to default value (=50).")
+            warnings.warn(
+                "The parameter loops_lambda is None. Reset to default value (=50)."
+            )
             loops_lambda = 50
         else:
             try:
                 loops_lambda = int(loops_lambda)
             except (TypeError, ValueError):
-                warnings.warn("The parameter loops_lambda is non-numeric. Reset to default value (=50).")
+                warnings.warn(
+                    "The parameter loops_lambda is non-numeric. Reset to default value"
+                    " (=50)."
+                )
                 loops_lambda = 50
             else:
                 if loops_lambda <= 0:
-                    warnings.warn("The parameter loops_lambda is non-positive. Reset to default value (=50).")
+                    warnings.warn(
+                        "The parameter loops_lambda is non-positive. Reset to default"
+                        " value (=50)."
+                    )
                     loops_lambda = 50
 
     # Check trace_progress
     if not isinstance(trace_progress, bool):
-        warnings.warn("The parameter trace_progress is not boolean. Reset to default value (=False).")
+        warnings.warn(
+            "The parameter trace_progress is not boolean. Reset to default value"
+            " (=False)."
+        )
         trace_progress = False
 
     if alpha == 1.0:
@@ -333,7 +400,7 @@ def seagull(
             proportion_xi=xi,
             num_intervals=loops_lambda,
             num_fixed_effects=p1,
-            trace_progress=trace_progress
+            trace_progress=trace_progress,
         )
     elif alpha == 0.0:
         res = group_lasso(
@@ -350,7 +417,7 @@ def seagull(
             proportion_xi=xi,
             num_intervals=loops_lambda,
             num_fixed_effects=p1,
-            trace_progress=trace_progress
+            trace_progress=trace_progress,
         )
     else:
         res = sparse_group_lasso(
@@ -368,8 +435,7 @@ def seagull(
             proportion_xi=xi,
             num_intervals=loops_lambda,
             num_fixed_effects=p1,
-            trace_progress=trace_progress
+            trace_progress=trace_progress,
         )
 
     return res
-
