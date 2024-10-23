@@ -20,21 +20,15 @@ def mock_imports(monkeypatch):
     def mock_sparse_group_lasso(*args, **kwargs):
         return {"result": "sparse_group_lasso", "lambda_values": [1.0]}
 
+    monkeypatch.setattr("lambda_max_lasso.lambda_max_lasso", mock_lambda_max)
+    monkeypatch.setattr("lambda_max_group_lasso.lambda_max_group_lasso", mock_lambda_max)
     monkeypatch.setattr(
-        "PyGRidge.src.lambda_max_lasso.lambda_max_lasso", mock_lambda_max
-    )
-    monkeypatch.setattr(
-        "PyGRidge.src.lambda_max_group_lasso.lambda_max_group_lasso", mock_lambda_max
-    )
-    monkeypatch.setattr(
-        "PyGRidge.src.lambda_max_sparse_group_lasso.lambda_max_sparse_group_lasso",
+        "lambda_max_sparse_group_lasso.lambda_max_sparse_group_lasso",
         mock_lambda_max,
     )
-    monkeypatch.setattr("PyGRidge.src.lasso.lasso", mock_lasso)
-    monkeypatch.setattr("PyGRidge.src.group_lasso.group_lasso", mock_group_lasso)
-    monkeypatch.setattr(
-        "PyGRidge.src.sparse_group_lasso.sparse_group_lasso", mock_sparse_group_lasso
-    )
+    monkeypatch.setattr("lasso.lasso", mock_lasso)
+    monkeypatch.setattr("group_lasso.group_lasso", mock_group_lasso)
+    monkeypatch.setattr("sparse_group_lasso.sparse_group_lasso", mock_sparse_group_lasso)
 
 
 # Fixture for common test data
@@ -94,19 +88,19 @@ def test_mismatching_dimensions_y_Z():
 # Test core functionality
 def test_lasso(test_data):
     y, X, Z, weights_u, _ = test_data
-    result = seagull(y, X, Z, weights_u, alpha=1.0)
+    result = seagull(y=y, X=X, Z=Z, weights_u=weights_u, alpha=1.0)
     assert result["result"] == "lasso"
 
 
 def test_group_lasso(test_data):
     y, X, Z, weights_u, groups = test_data
-    result = seagull(y, X, Z, weights_u, groups=groups, alpha=0.0)
+    result = seagull(y=y, X=X, Z=Z, weights_u=weights_u, groups=groups, alpha=0.0)
     assert result["result"] == "group_lasso"
 
 
 def test_sparse_group_lasso(test_data):
     y, X, Z, weights_u, groups = test_data
-    result = seagull(y, X, Z, weights_u, groups=groups, alpha=0.5)
+    result = seagull(y=y, X=X, Z=Z, weights_u=weights_u, groups=groups, alpha=0.5)
     assert result["result"] == "sparse_group_lasso"
 
 
