@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from ..src.seagull import seagull
+from src.seagull import seagull
 from numpy.testing import assert_allclose
 import warnings
 
