@@ -1,11 +1,10 @@
 """Create covariance matrix designs for various statistical models."""
 
+import numpy as np
 from abc import ABC, abstractmethod
 from typing import List, Callable, Union
 
-import numpy as np
-
-from ..src.groupedfeatures import GroupedFeatures, fill
+from groupedfeatures import GroupedFeatures, fill
 
 
 class DiscreteNonParametric:
@@ -177,7 +176,7 @@ class AR1Design(CovarianceDesign):
             raise RuntimeError(f"Failed to compute covariance matrix: {e}")
 
         if not np.allclose(Sigma, Sigma.T):
-            raise ValueError("Covariance matrix :math:`\Sigma` must be symmetric.")
+            raise ValueError("Covariance matrix :math:`\\Sigma` must be symmetric.")
 
         return Sigma
 
@@ -196,7 +195,7 @@ class AR1Design(CovarianceDesign):
             raise RuntimeError(f"Eigenvalue computation failed: {e}")
 
         if eigs.size == 0:
-            raise ValueError("Covariance matrix :math:`\Sigma` has no eigenvalues.")
+            raise ValueError("Covariance matrix :math:`\\Sigma` has no eigenvalues.")
 
         probs = fill(1.0 / len(eigs), len(eigs))
         if not np.isclose(np.sum(probs), 1.0):
@@ -206,7 +205,7 @@ class AR1Design(CovarianceDesign):
 
 
 class DiagonalCovarianceDesign(CovarianceDesign):
-    """Abstract base class for covariance designs that produce diagonal covariance matrices.
+    r"""Abstract base class for covariance designs that produce diagonal covariance matrices.
 
     Since diagonal covariance matrices have non-zero entries only on the diagonal, this class
     provides a common structure for such designs, managing the number of features.
@@ -444,9 +443,9 @@ class ExponentialOrderStatsCovarianceDesign(DiagonalCovarianceDesign):
             )
 
         if Sigma.shape[0] != Sigma.shape[1]:
-            raise ValueError("Covariance matrix :math:`\Sigma` must be square.")
+            raise ValueError("Covariance matrix :math:`\\Sigma` must be square.")
         if not np.allclose(Sigma, Sigma.T):
-            raise ValueError("Covariance matrix :math:`\Sigma` must be symmetric.")
+            raise ValueError("Covariance matrix :math:`\\Sigma` must be symmetric.")
 
         return Sigma
 
@@ -504,9 +503,9 @@ class BlockDiagonal:
             raise RuntimeError(f"Failed to construct block diagonal matrix: {e}")
 
         if Sigma.size == 0:
-            raise ValueError("Resulting covariance matrix :math:`\Sigma` is empty.")
+            raise ValueError("Resulting covariance matrix :math:`\\Sigma` is empty.")
         if not np.allclose(Sigma, Sigma.T):
-            raise ValueError("Covariance matrix :math:`\Sigma` must be symmetric.")
+            raise ValueError("Covariance matrix :math:`\\Sigma` must be symmetric.")
 
         return Sigma
 
@@ -703,9 +702,9 @@ class BlockCovarianceDesign(CovarianceDesign):
             )
 
         if Sigma.size == 0:
-            raise ValueError("Resulting covariance matrix :math:`\Sigma` is empty.")
+            raise ValueError("Resulting covariance matrix :math:`\\Sigma` is empty.")
         if not np.allclose(Sigma, Sigma.T):
-            raise ValueError("Covariance matrix :math:`\Sigma` must be symmetric.")
+            raise ValueError("Covariance matrix :math:`\\Sigma` must be symmetric.")
 
         return Sigma
 
@@ -817,14 +816,14 @@ def simulate_rotated_design(
 
     Sigma = cov.get_Sigma()
     if not isinstance(Sigma, np.ndarray):
-        raise TypeError("Covariance matrix :math:`\Sigma` must be a numpy.ndarray.")
+        raise TypeError("Covariance matrix :math:`\\Sigma` must be a numpy.ndarray.")
     if Sigma.ndim != 2:
-        raise ValueError("Covariance matrix :math:`\Sigma` must be 2-dimensional.")
+        raise ValueError("Covariance matrix :math:`\\Sigma` must be 2-dimensional.")
     if Sigma.shape[0] != Sigma.shape[1]:
-        raise ValueError("Covariance matrix :math:`\Sigma` must be square.")
+        raise ValueError("Covariance matrix :math:`\\Sigma` must be square.")
     if np.any(np.isnan(Sigma)) or np.any(np.isinf(Sigma)):
         raise ValueError(
-            "Covariance matrix :math:`\Sigma` contains NaN or infinite values."
+            "Covariance matrix :math:`\\Sigma` contains NaN or infinite values."
         )
 
     try:
@@ -867,66 +866,49 @@ def simulate_rotated_design(
     return X
 
 
-def set_groups(design: CovarianceDesign, groups_or_p: Union[GroupedFeatures, int]):
-    """Configures the number of features or feature groups for a given `CovarianceDesign`
-    instance.
-
-    This function allows setting the dimensionality either as a single integer (total
-    number of features) or as a `GroupedFeatures` instance that specifies groupings
-    within the features. When provided with group information, the covariance design
-    adjusts its internal structure to accommodate the groups.
-
-    Parameters
-    ----------
-    design : CovarianceDesign
-        An instance of CovarianceDesign to configure.
-    groups_or_p : GroupedFeatures or int
-        Either an integer specifying the total number of features
-        or a `GroupedFeatures` instance defining feature groupings.
-
-    Raises
-    ------
-    TypeError
-        If `groups_or_p` is neither an instance of `GroupedFeatures` nor an integer.
-    ValueError
-        If group sizes are inconsistent with the number of blocks in `BlockCovarianceDesign`.
-
-    Examples
-    --------
-    >>> groups = GroupedFeatures(ps=[2, 3])
-    >>> set_groups(design, groups)
-    """
+def set_groups(
+    design: CovarianceDesign, groups_or_p: Union[GroupedFeatures, int]
+) -> None:
+    """Set the number of features for a covariance design."""
     if not isinstance(design, CovarianceDesign):
         raise TypeError(
-            "'design' must be an instance of CovarianceDesign, got"
-            f" {type(design).__name__}"
+            f"'design' must be an instance of CovarianceDesign, got {type(design).__name__}"
         )
 
-    if isinstance(groups_or_p, GroupedFeatures):
-        groups = groups_or_p
-        p = groups.nfeatures()
-
-        if isinstance(design, BlockCovarianceDesign):
-            if len(groups.ps) != len(design.blocks):
-                raise ValueError(
-                    "Number of groups must match number of blocks in"
-                    " BlockCovarianceDesign."
-                )
-            for block, ps in zip(design.blocks, groups.ps):
-                set_groups(block, ps)
-            design.groups = groups
-        else:
-            design.p = p
-
-    elif isinstance(groups_or_p, int):
+    # Check if groups_or_p is an integer
+    if isinstance(groups_or_p, int):
         if groups_or_p <= 0:
             raise ValueError("'groups_or_p' as an integer must be a positive value.")
 
         if isinstance(design, BlockCovarianceDesign):
-            for block in design.blocks:
-                set_groups(block, groups_or_p)
+            n_blocks = len(design.blocks)
+            size_per_block = groups_or_p // n_blocks
+            remainder = groups_or_p % n_blocks
+            sizes = [
+                size_per_block + (1 if i < remainder else 0) for i in range(n_blocks)
+            ]
+            groups = GroupedFeatures(ps=sizes)
+
+            for block, size in zip(design.blocks, sizes):
+                block.p = size
+            design.groups = groups
         else:
             design.p = groups_or_p
+        return
 
-    else:
-        raise TypeError("groups_or_p must be an instance of GroupedFeatures or int.")
+    # Check if groups_or_p is a GroupedFeatures instance using __class__ comparison
+    if groups_or_p.__class__.__name__ == "GroupedFeatures":
+        if isinstance(design, BlockCovarianceDesign):
+            if len(groups_or_p.ps) != len(design.blocks):
+                raise ValueError(
+                    "Number of groups must match number of blocks in BlockCovarianceDesign."
+                )
+            for block, group_size in zip(design.blocks, groups_or_p.ps):
+                block.p = group_size
+            design.groups = groups_or_p
+        else:
+            design.p = groups_or_p.nfeatures()
+        return
+
+    # If we get here, the input type was invalid
+    raise TypeError("groups_or_p must be an instance of GroupedFeatures or int.")

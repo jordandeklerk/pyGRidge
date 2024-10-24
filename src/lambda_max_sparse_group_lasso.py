@@ -1,7 +1,7 @@
 """Compute the maximum lambda value for sparse group lasso regularization."""
 
 import numpy as np
-from ..src.bisection import bisection
+from bisection import bisection
 
 
 def lambda_max_sparse_group_lasso(

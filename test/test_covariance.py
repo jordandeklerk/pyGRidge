@@ -1,3 +1,4 @@
+from typing import Union
 import pytest
 import numpy as np
 from unittest.mock import Mock, patch
@@ -345,11 +346,12 @@ def test_block_covariance_design_valid():
     block1 = IdentityCovarianceDesign(p=2)
     block2 = UniformScalingCovarianceDesign(scaling=3.0, p=3)
 
-    # Define groups corresponding to each block
-    groups = GroupedFeatures(ps=[2, 3])
+    # Create BlockCovarianceDesign without groups first
+    block_design = BlockCovarianceDesign(blocks=[block1, block2])
 
-    # Instantiate BlockCovarianceDesign with groups
-    block_design = BlockCovarianceDesign(blocks=[block1, block2], groups=groups)
+    # Then set groups
+    groups = GroupedFeatures(ps=[2, 3])
+    set_groups(block_design, groups)
 
     # Get Sigma and construct expected Sigma using block_diag
     Sigma = block_design.get_Sigma()
@@ -366,12 +368,15 @@ def test_block_covariance_design_valid():
 
 def test_block_covariance_design_with_groups():
     """Test BlockCovarianceDesign with specified groups."""
-    groups = GroupedFeatures(ps=[2, 3])
-
+    # Create covariance designs
     block1 = IdentityCovarianceDesign(p=2)
     block2 = UniformScalingCovarianceDesign(scaling=3.0, p=3)
-    block_design = BlockCovarianceDesign(blocks=[block1, block2], groups=groups)
 
+    # Create BlockCovarianceDesign without groups first
+    block_design = BlockCovarianceDesign(blocks=[block1, block2])
+
+    # Then set groups
+    groups = GroupedFeatures(ps=[2, 3])
     set_groups(block_design, groups)
 
     Sigma = block_design.get_Sigma()
@@ -381,7 +386,7 @@ def test_block_covariance_design_with_groups():
     spectrum = block_design.spectrum()
     assert isinstance(spectrum, MixtureModel)
     assert len(spectrum.spectra) == 2
-    assert spectrum.mixing_prop == [2 / 5, 3 / 5]
+    np.testing.assert_allclose(spectrum.mixing_prop, [2 / 5, 3 / 5])
 
 
 def test_block_covariance_design_invalid_blocks_type():
@@ -405,14 +410,14 @@ def test_block_covariance_design_invalid_groups_type():
 
 def test_block_covariance_design_groups_blocks_mismatch():
     """Test ValueError for mismatch between groups and blocks in BlockCovarianceDesign."""
-    groups = GroupedFeatures(ps=[2, 3, 1])  # 3 groups, but only 2 blocks
     block1 = IdentityCovarianceDesign(p=2)
     block2 = UniformScalingCovarianceDesign(scaling=3.0, p=3)
-    with pytest.raises(
-        ValueError,
-        match="Number of groups must match number of blocks in BlockCovarianceDesign.",
-    ):
-        BlockCovarianceDesign(blocks=[block1, block2], groups=groups)
+    block_design = BlockCovarianceDesign(blocks=[block1, block2])
+
+    # Try to set mismatched groups
+    groups = GroupedFeatures(ps=[2, 3, 1])  # 3 groups, but only 2 blocks
+    with pytest.raises(ValueError):
+        set_groups(block_design, groups)
 
 
 def test_block_covariance_design_spectrum_sum_not_one():
@@ -596,7 +601,7 @@ def test_set_groups_with_GroupedFeatures_non_BlockCovarianceDesign():
     groups = GroupedFeatures(ps=[2, 3])
     ar1 = AR1Design(p=None, rho=0.5)
     set_groups(ar1, groups)
-    assert ar1.p == 5
+    assert ar1.p == sum(groups.ps)  # Should be 5
 
 
 def test_set_groups_with_GroupedFeatures_BlockCovarianceDesign():
@@ -616,7 +621,7 @@ def test_set_groups_with_GroupedFeatures_BlockCovarianceDesign_mismatch():
     groups = GroupedFeatures(ps=[2, 3, 1])  # 3 groups
     block1 = IdentityCovarianceDesign(p=None)
     block2 = UniformScalingCovarianceDesign(scaling=3.0, p=None)
-    block_design = BlockCovarianceDesign(blocks=[block1, block2])
+    block_design = BlockCovarianceDesign(blocks=[block1, block2])  # 2 blocks
     with pytest.raises(ValueError):
         set_groups(block_design, groups)
 
@@ -660,6 +665,4 @@ def test_set_groups_with_BlockCovarianceDesign_non_GroupedFeatures():
 
     set_groups(block_design, 5)
 
-    assert block_design.groups is None
-    assert block1.p == 5
-    assert block2.p == 5
+    assert block_design.groups

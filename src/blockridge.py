@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 from typing import Union, TypeVar
 import numpy as np
 from scipy.linalg import cho_solve
-from ..src.groupedfeatures import GroupedFeatures
-from ..src.nnls import nonneg_lsq, NNLSError
+from groupedfeatures import GroupedFeatures
+from nnls import nonneg_lsq, NNLSError
 import warnings
 
 T = TypeVar("T")

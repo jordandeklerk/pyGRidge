@@ -2,12 +2,12 @@
 
 import numpy as np
 import warnings
-from src.lambda_max_lasso import lambda_max_lasso
-from src.lambda_max_group_lasso import lambda_max_group_lasso
-from src.lambda_max_sparse_group_lasso import lambda_max_sparse_group_lasso
-from src.lasso import lasso
-from src.group_lasso import group_lasso
-from src.sparse_group_lasso import sparse_group_lasso
+from lambda_max_lasso import lambda_max_lasso
+from lambda_max_group_lasso import lambda_max_group_lasso
+from lambda_max_sparse_group_lasso import lambda_max_sparse_group_lasso
+from lasso import lasso
+from group_lasso import group_lasso
+from sparse_group_lasso import sparse_group_lasso
 
 
 def seagull(

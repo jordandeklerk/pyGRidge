@@ -9,37 +9,73 @@ import warnings
 @pytest.fixture(autouse=True)
 def mock_imports(monkeypatch):
     import numpy as np
+
     def mock_lambda_max(*args, **kwargs):
         return 1.0
 
     def mock_lasso(*args, **kwargs):
-        return {"result": "lasso", "lambda_values": [1.0], "beta": np.zeros(2)}
+        # Return dictionary with proper structure
+        return {
+            "result": "lasso",
+            "lambda_values": np.array([1.0], dtype=np.float64),
+            "beta": np.zeros(2, dtype=np.float64),
+        }
 
     def mock_group_lasso(*args, **kwargs):
-        return {"result": "group_lasso", "lambda_values": [1.0], "beta": np.zeros(2)}
+        return {
+            "result": "group_lasso",
+            "lambda_values": np.array([1.0], dtype=np.float64),
+            "beta": np.zeros(2, dtype=np.float64),
+        }
 
     def mock_sparse_group_lasso(*args, **kwargs):
-        return {"result": "sparse_group_lasso", "lambda_values": [1.0], "beta": np.zeros(2)}
+        return {
+            "result": "sparse_group_lasso",
+            "lambda_values": np.array([1.0], dtype=np.float64),
+            "beta": np.zeros(2, dtype=np.float64),
+        }
 
-    monkeypatch.setattr("lambda_max_lasso.lambda_max_lasso", mock_lambda_max)
-    monkeypatch.setattr("lambda_max_group_lasso.lambda_max_group_lasso", mock_lambda_max)
+    # Use full package paths instead of relative imports
     monkeypatch.setattr(
-        "lambda_max_sparse_group_lasso.lambda_max_sparse_group_lasso",
+        "PyGRidge.src.lambda_max_lasso.lambda_max_lasso", mock_lambda_max
+    )
+    monkeypatch.setattr(
+        "PyGRidge.src.lambda_max_group_lasso.lambda_max_group_lasso", mock_lambda_max
+    )
+    monkeypatch.setattr(
+        "PyGRidge.src.lambda_max_sparse_group_lasso.lambda_max_sparse_group_lasso",
         mock_lambda_max,
     )
-    monkeypatch.setattr("lasso.lasso", mock_lasso)
-    monkeypatch.setattr("group_lasso.group_lasso", mock_group_lasso)
-    monkeypatch.setattr("sparse_group_lasso.sparse_group_lasso", mock_sparse_group_lasso)
+    monkeypatch.setattr("PyGRidge.src.lasso.lasso", mock_lasso)
+    monkeypatch.setattr("PyGRidge.src.group_lasso.group_lasso", mock_group_lasso)
+    monkeypatch.setattr(
+        "PyGRidge.src.sparse_group_lasso.sparse_group_lasso", mock_sparse_group_lasso
+    )
+
+    # Also patch the functions directly in the seagull module
+    monkeypatch.setattr("PyGRidge.src.seagull.lambda_max_lasso", mock_lambda_max)
+    monkeypatch.setattr("PyGRidge.src.seagull.lambda_max_group_lasso", mock_lambda_max)
+    monkeypatch.setattr(
+        "PyGRidge.src.seagull.lambda_max_sparse_group_lasso", mock_lambda_max
+    )
+    monkeypatch.setattr("PyGRidge.src.seagull.lasso", mock_lasso)
+    monkeypatch.setattr("PyGRidge.src.seagull.group_lasso", mock_group_lasso)
+    monkeypatch.setattr(
+        "PyGRidge.src.seagull.sparse_group_lasso", mock_sparse_group_lasso
+    )
 
 
 # Fixture for common test data
 @pytest.fixture
 def test_data():
-    y = np.array([1, 2, 3, 4, 5])
-    X = np.array([[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]])
-    Z = np.array([[1, 1, 1], [1, 2, 3], [1, 3, 6], [1, 4, 10], [1, 5, 15]])
-    weights_u = np.array([1, 1, 1])
-    groups = np.array([1, 1, 2, 2, 3])
+    # Ensure all arrays are float64 to avoid casting issues
+    y = np.array([1, 2, 3, 4, 5], dtype=np.float64)
+    X = np.array([[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]], dtype=np.float64)
+    Z = np.array(
+        [[1, 1, 1], [1, 2, 3], [1, 3, 6], [1, 4, 10], [1, 5, 15]], dtype=np.float64
+    )
+    weights_u = np.array([1, 1, 1], dtype=np.float64)
+    groups = np.array([1, 1, 2, 2, 3], dtype=np.float64)
     return y, X, Z, weights_u, groups
 
 
@@ -107,11 +143,11 @@ def test_sparse_group_lasso(test_data):
 
 # Test edge cases and parameter validation
 def test_invalid_alpha():
-    y = np.array([1, 2, 3])
-    Z = np.array([[1, 2], [3, 4], [5, 6]])
+    y = np.array([1, 2, 3], dtype=np.float64)
+    Z = np.array([[1, 2], [3, 4], [5, 6]], dtype=np.float64)
     with pytest.warns(UserWarning, match="The parameter alpha is out of range"):
         result = seagull(y, Z=Z, alpha=2.0)
-        assert result["result"] == "lasso"  # Should default to lasso when alpha > 1
+        assert result["result"] == "lasso"
 
 
 def test_missing_groups_for_group_lasso():
@@ -122,24 +158,24 @@ def test_missing_groups_for_group_lasso():
 
 
 def test_invalid_rel_acc():
-    y = np.array([1, 2, 3])
-    Z = np.array([[1, 2], [3, 4], [5, 6]])
+    y = np.array([1, 2, 3], dtype=np.float64)
+    Z = np.array([[1, 2], [3, 4], [5, 6]], dtype=np.float64)
     with pytest.warns(UserWarning, match="The parameter rel_acc is non-positive"):
         result = seagull(y, Z=Z, rel_acc=-0.1, alpha=1.0)
         assert result["result"] == "lasso"
 
 
 def test_invalid_max_iter():
-    y = np.array([1, 2, 3])
-    Z = np.array([[1, 2], [3, 4], [5, 6]])
+    y = np.array([1, 2, 3], dtype=np.float64)
+    Z = np.array([[1, 2], [3, 4], [5, 6]], dtype=np.float64)
     with pytest.warns(UserWarning, match="The parameter max_iter is non-positive"):
         result = seagull(y, Z=Z, max_iter=0, alpha=1.0)
         assert result["result"] == "lasso"
 
 
 def test_invalid_gamma_bls():
-    y = np.array([1, 2, 3])
-    Z = np.array([[1, 2], [3, 4], [5, 6]])
+    y = np.array([1, 2, 3], dtype=np.float64)
+    Z = np.array([[1, 2], [3, 4], [5, 6]], dtype=np.float64)
     with pytest.warns(UserWarning, match="The parameter gamma_bls is out of range"):
         result = seagull(y, Z=Z, gamma_bls=1.5, alpha=1.0)
         assert result["result"] == "lasso"
