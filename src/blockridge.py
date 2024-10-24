@@ -1,9 +1,11 @@
-"""Regression estimators based on group ridge regression."""
+"""Group Ridge regression estimators."""
 
 from abc import ABC, abstractmethod
-from typing import Union, TypeVar
+from typing import Union, TypeVar, Dict, Any
 import numpy as np
 from scipy.linalg import cho_solve
+from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.utils.validation import check_X_y, check_array
 from groupedfeatures import GroupedFeatures
 from nnls import nonneg_lsq, NNLSError
 import warnings
@@ -13,29 +15,25 @@ T = TypeVar("T")
 
 class RidgeRegressionError(Exception):
     """Base exception class for Ridge regression errors."""
-
     pass
 
 
 class InvalidDimensionsError(RidgeRegressionError):
     """Exception raised when matrix dimensions are incompatible."""
-
     pass
 
 
 class SingularMatrixError(RidgeRegressionError):
     """Exception raised when a matrix is singular or nearly singular."""
-
     pass
 
 
 class NumericalInstabilityError(RidgeRegressionError):
     """Exception raised when numerical instability is detected."""
-
     pass
 
 
-class AbstractRidgePredictor(ABC):
+class BaseRidgePredictor(ABC):
     r"""Abstract base class for Ridge regression predictors.
 
     This class defines the interface that all concrete Ridge predictors must
@@ -46,30 +44,30 @@ class AbstractRidgePredictor(ABC):
     Ridge regression seeks to minimize the following objective function:
 
     .. math::
-        \min_{\beta} \|Y - X\beta\|_2^2 + \lambda\|\beta\|_2^2
+        \min_{\beta} \|y - X\beta\|_2^2 + \alpha\|\beta\|_2^2
 
     where:
-    - :math:`Y` is the response vector with dimensions :math:`(n, )`.
-    - :math:`X` is the design matrix with dimensions :math:`(n, p)`.
-    - :math:`\beta` is the coefficient vector with dimensions :math:`(p, )`.
-    - :math:`\lambda` is the regularization parameter.
+    - :math:`y` is the target vector with dimensions :math:`(n_{\text{samples}}, )`.
+    - :math:`X` is the design matrix with dimensions :math:`(n_{\text{samples}}, n_{\text{features}})`.
+    - :math:`\beta` is the coefficient vector with dimensions :math:`(n_{\text{features}}, )`.
+    - :math:`\alpha` is the regularization parameter.
 
     The solution to this optimization problem is given by:
 
     .. math::
-        \beta = (X^T X + \lambda I_p)^{-1} X^T Y
+        \beta = (X^T X + \alpha I_p)^{-1} X^T y
     """
 
     @abstractmethod
-    def update_lambda_s(self, groups: GroupedFeatures, lambdas: np.ndarray):
-        r"""Update the regularization parameters (:math:`\lambda`) based on feature groups.
+    def set_params(self, groups: GroupedFeatures, alpha: np.ndarray):
+        r"""Update the regularization parameters (:math:`\alpha`) based on feature groups.
 
         Parameters
         ----------
         groups : GroupedFeatures
             The grouped features object defining feature groupings.
-        lambdas : np.ndarray
-            The new :math:`\lambda` values for each group.
+        alpha : np.ndarray
+            The new :math:`\alpha` values for each group.
 
         Returns
         -------
@@ -78,19 +76,19 @@ class AbstractRidgePredictor(ABC):
         pass
 
     @abstractmethod
-    def trace_XtX(self) -> float:
-        """Compute the trace of :math:`X^T X`.
+    def _trace_gram_matrix(self) -> float:
+        """Compute the trace of the Gram matrix :math:`X^T X`.
 
         Returns
         -------
         float
-            The trace of :math:`X^T X`.
+            The trace of the Gram matrix.
         """
         pass
 
     @abstractmethod
-    def XtXp_lambda_ldiv_XtX(self) -> np.ndarray:
-        r"""Compute :math:`(X^T X + \Lambda)^{-1} X^T X`.
+    def _solve_gram_system(self) -> np.ndarray:
+        r"""Compute :math:`(X^T X + \alpha I)^{-1} X^T X`.
 
         Returns
         -------
@@ -100,8 +98,8 @@ class AbstractRidgePredictor(ABC):
         pass
 
     @abstractmethod
-    def ldiv(self, B: np.ndarray) -> np.ndarray:
-        r"""Solve the linear system :math:`(X^T X + \Lambda) x = B`.
+    def _solve_system(self, B: np.ndarray) -> np.ndarray:
+        r"""Solve the linear system :math:`(X^T X + \alpha I) x = B`.
 
         Parameters
         ----------
@@ -116,26 +114,30 @@ class AbstractRidgePredictor(ABC):
         pass
 
 
-class CholeskyRidgePredictor(AbstractRidgePredictor):
+class CholeskyRidgePredictor(BaseRidgePredictor):
     r"""Ridge predictor using Cholesky decomposition for efficient matrix inversion.
 
-    Suitable for scenarios where the number of features (:math:`p`) is less than the number
-    of samples (:math:`n`), leveraging the properties of Cholesky decomposition to solve
-    the Ridge regression problem efficiently.
+    Suitable for scenarios where the number of features is less than the number
+    of samples.
+
+    Parameters
+    ----------
+    X : np.ndarray of shape (n_samples, n_features)
+        Training data.
 
     Attributes
     ----------
-    n : int
+    n_samples_ : int
         Number of samples.
-    p : int
+    n_features_ : int
         Number of features.
-    XtX : np.ndarray
-        The :math:`X^T X` matrix scaled by the number of samples.
-    XtXp_lambda : np.ndarray
-        The augmented matrix (:math:`X^T X + \Lambda`).
-    XtXp_lambda_chol : np.ndarray
-        The Cholesky decomposition of (:math:`X^T X + \Lambda`).
-    lower : bool
+    gram_matrix_ : np.ndarray of shape (n_features, n_features)
+        The Gram matrix :math:`X^T X` scaled by n_samples.
+    gram_reg_ : np.ndarray of shape (n_features, n_features)
+        The regularized Gram matrix :math:`X^T X + \alpha I`.
+    gram_reg_chol_ : np.ndarray of shape (n_features, n_features)
+        The Cholesky decomposition of gram_reg_.
+    lower_ : bool
         Indicates if the Cholesky factor is lower triangular.
     """
 
@@ -144,8 +146,8 @@ class CholeskyRidgePredictor(AbstractRidgePredictor):
 
         Parameters
         ----------
-        X : np.ndarray
-            The design matrix.
+        X : np.ndarray of shape (n_samples, n_features)
+            Training data.
 
         Raises
         ------
@@ -159,14 +161,14 @@ class CholeskyRidgePredictor(AbstractRidgePredictor):
         if np.any(np.isnan(X)) or np.any(np.isinf(X)):
             raise ValueError("X contains NaN or infinity values.")
 
-        self.n, self.p = X.shape
-        self.XtX = np.dot(X.T, X) / self.n
-        self.XtXp_lambda = self.XtX + np.eye(self.p)  # Initialize with identity matrix
-        self.update_cholesky()
-        self.lower = True
+        self.n_samples_, self.n_features_ = X.shape
+        self.gram_matrix_ = np.dot(X.T, X) / self.n_samples_
+        self.gram_reg_ = self.gram_matrix_ + np.eye(self.n_features_)
+        self._update_cholesky()
+        self.lower_ = True
 
-    def update_cholesky(self):
-        r"""Update the Cholesky decomposition of (:math:`X^T X + \Lambda`).
+    def _update_cholesky(self):
+        r"""Update the Cholesky decomposition of the regularized Gram matrix.
 
         Raises
         ------
@@ -174,53 +176,53 @@ class CholeskyRidgePredictor(AbstractRidgePredictor):
             If the matrix is not positive definite.
         """
         try:
-            self.XtXp_lambda_chol = np.linalg.cholesky(self.XtXp_lambda)
+            self.gram_reg_chol_ = np.linalg.cholesky(self.gram_reg_)
         except np.linalg.LinAlgError:
             raise SingularMatrixError(
                 "Failed to compute Cholesky decomposition. Matrix may not be positive "
                 "definite."
             )
 
-    def update_lambda_s(self, groups: GroupedFeatures, lambdas: np.ndarray):
+    def set_params(self, groups: GroupedFeatures, alpha: np.ndarray):
         r"""Update the regularization parameters and recompute the Cholesky decomposition.
 
         Parameters
         ----------
         groups : GroupedFeatures
             The grouped features object.
-        lambdas : np.ndarray
-            The new :math:`\lambda` values for each group.
+        alpha : np.ndarray
+            The new :math:`\alpha` values for each group.
 
         Returns
         -------
         None
         """
-        diag = groups.group_expand(lambdas)
-        self.XtXp_lambda = self.XtX + np.diag(diag)
-        self.update_cholesky()
+        diag = groups.group_expand(alpha)
+        self.gram_reg_ = self.gram_matrix_ + np.diag(diag)
+        self._update_cholesky()
 
-    def trace_XtX(self) -> float:
-        """Compute the trace of :math:`X^T X`.
+    def _trace_gram_matrix(self) -> float:
+        """Compute the trace of the Gram matrix.
 
         Returns
         -------
         float
-            The trace of :math:`X^T X`.
+            The trace of the Gram matrix.
         """
-        return np.trace(self.XtX)
+        return np.trace(self.gram_matrix_)
 
-    def XtXp_lambda_ldiv_XtX(self) -> np.ndarray:
-        r"""Compute :math:`(X^T X + \Lambda)^{-1} X^T X` using Cholesky decomposition.
+    def _solve_gram_system(self) -> np.ndarray:
+        r"""Compute :math:`(X^T X + \alpha I)^{-1} X^T X` using Cholesky decomposition.
 
         Returns
         -------
         np.ndarray
             The result of the computation.
         """
-        return cho_solve((self.XtXp_lambda_chol, self.lower), self.XtX)
+        return cho_solve((self.gram_reg_chol_, self.lower_), self.gram_matrix_)
 
-    def ldiv(self, B: np.ndarray) -> np.ndarray:
-        r"""Solve the system :math:`(X^T X + \Lambda) x = B` using Cholesky decomposition.
+    def _solve_system(self, B: np.ndarray) -> np.ndarray:
+        r"""Solve the system :math:`(X^T X + \alpha I) x = B` using Cholesky decomposition.
 
         Parameters
         ----------
@@ -232,15 +234,14 @@ class CholeskyRidgePredictor(AbstractRidgePredictor):
         np.ndarray
             The solution vector :math:`x`.
         """
-        return cho_solve((self.XtXp_lambda_chol, self.lower), B)
+        return cho_solve((self.gram_reg_chol_, self.lower_), B)
 
 
-class WoodburyRidgePredictor(AbstractRidgePredictor):
+class WoodburyRidgePredictor(BaseRidgePredictor):
     r"""Ridge predictor using the Woodbury matrix identity for efficient matrix inversion.
 
-    This class is suitable for scenarios where the number of features (:math:`p`) is greater
-    than the number of samples (:math:`n`), leveraging the Woodbury matrix identity to solve
-    the Ridge regression problem efficiently.
+    This class is suitable for scenarios where the number of features is greater
+    than the number of samples.
 
     The Woodbury matrix identity states:
 
@@ -248,26 +249,31 @@ class WoodburyRidgePredictor(AbstractRidgePredictor):
         (A + UCV)^{-1} = A^{-1} - A^{-1}U(C^{-1} + V A^{-1} U)^{-1} V A^{-1}
 
     In the context of Ridge regression:
-        :math:`A = \Lambda` (diagonal matrix of regularization parameters)
+        :math:`A = \alpha I` (diagonal matrix of regularization parameters)
         :math:`U = X^T`
         :math:`C = I` (identity matrix)
         :math:`V = X`
 
+    Parameters
+    ----------
+    X : np.ndarray of shape (n_samples, n_features)
+        Training data.
+
     Attributes
     ----------
-    n : int
+    n_samples_ : int
         Number of samples.
-    p : int
+    n_features_ : int
         Number of features.
-    X : np.ndarray
-        The design matrix.
-    XtX : np.ndarray
-        The :math:`X^T X` matrix.
-    A_inv : np.ndarray
-        The inverse of :math:`\Lambda`.
-    U : np.ndarray
+    X_ : np.ndarray of shape (n_samples, n_features)
+        The training data.
+    gram_matrix_ : np.ndarray of shape (n_features, n_features)
+        The Gram matrix :math:`X^T X`.
+    alpha_inv_ : np.ndarray of shape (n_features, n_features)
+        The inverse of :math:`\alpha I`.
+    U_ : np.ndarray of shape (n_features, n_samples)
         Matrix :math:`U` in the Woodbury identity.
-    V : np.ndarray
+    V_ : np.ndarray of shape (n_samples, n_features)
         Matrix :math:`V` in the Woodbury identity.
     """
 
@@ -276,8 +282,8 @@ class WoodburyRidgePredictor(AbstractRidgePredictor):
 
         Parameters
         ----------
-        X : np.ndarray
-            The design matrix.
+        X : np.ndarray of shape (n_samples, n_features)
+            Training data.
 
         Raises
         ------
@@ -291,40 +297,40 @@ class WoodburyRidgePredictor(AbstractRidgePredictor):
         if np.any(np.isnan(X)) or np.any(np.isinf(X)):
             raise ValueError("X contains NaN or infinity values.")
 
-        self.n, self.p = X.shape
-        self.X = X
-        self.XtX = X.T @ X
-        self.A_inv = np.eye(self.p)
-        self.U = X.T
-        self.V = X
+        self.n_samples_, self.n_features_ = X.shape
+        self.X_ = X
+        self.gram_matrix_ = X.T @ X
+        self.alpha_inv_ = np.eye(self.n_features_)
+        self.U_ = X.T
+        self.V_ = X
 
-    def update_lambda_s(self, groups: GroupedFeatures, lambdas: np.ndarray):
+    def set_params(self, groups: GroupedFeatures, alpha: np.ndarray):
         r"""Update the regularization parameters and recompute the inverse matrix.
 
         Parameters
         ----------
         groups : GroupedFeatures
             The grouped features object.
-        lambdas : np.ndarray
-            The new :math:`\lambda` values for each group.
+        alpha : np.ndarray
+            The new :math:`\alpha` values for each group.
 
         Raises
         ------
         ValueError
-            If lambdas contain non-positive values.
+            If alpha contains non-positive values.
 
         Returns
         -------
         None
         """
-        if np.any(lambdas <= 0):
-            raise ValueError("Lambda values must be positive.")
+        if np.any(alpha <= 0):
+            raise ValueError("Alpha values must be positive.")
 
-        diag = np.array(groups.group_expand(lambdas))
-        self.A_inv = np.diag(1 / diag)
-        self.woodbury_update()
+        diag = np.array(groups.group_expand(alpha))
+        self.alpha_inv_ = np.diag(1 / diag)
+        self._woodbury_update()
 
-    def woodbury_update(self):
+    def _woodbury_update(self):
         """Apply the Woodbury matrix identity to update the inverse matrix.
 
         Raises
@@ -333,37 +339,37 @@ class WoodburyRidgePredictor(AbstractRidgePredictor):
             If numerical instability is detected during the update.
         """
         try:
-            eye = np.eye(self.n)
-            AU = self.A_inv @ self.U
-            inv_term = np.linalg.inv(eye + self.V @ AU)
-            self.A_inv -= AU @ inv_term @ self.V @ self.A_inv
+            eye = np.eye(self.n_samples_)
+            AU = self.alpha_inv_ @ self.U_
+            inv_term = np.linalg.inv(eye + self.V_ @ AU)
+            self.alpha_inv_ -= AU @ inv_term @ self.V_ @ self.alpha_inv_
         except np.linalg.LinAlgError:
             raise NumericalInstabilityError(
                 "Numerical instability detected in Woodbury update."
             )
 
-    def trace_XtX(self) -> float:
-        """Compute the trace of :math:`X^T X`.
+    def _trace_gram_matrix(self) -> float:
+        """Compute the trace of the Gram matrix.
 
         Returns
         -------
         float
-            The trace of :math:`X^T X`.
+            The trace of the Gram matrix.
         """
-        return np.trace(self.XtX)
+        return np.trace(self.gram_matrix_)
 
-    def XtXp_lambda_ldiv_XtX(self) -> np.ndarray:
-        r"""Compute :math:`(X^T X + \Lambda)^{-1} X^T X`.
+    def _solve_gram_system(self) -> np.ndarray:
+        r"""Compute :math:`(X^T X + \alpha I)^{-1} X^T X`.
 
         Returns
         -------
         np.ndarray
             The result of the computation.
         """
-        return self.A_inv @ self.XtX
+        return self.alpha_inv_ @ self.gram_matrix_
 
-    def ldiv(self, B: np.ndarray) -> np.ndarray:
-        r"""Solve the system :math:`(X^T X + \Lambda) x = B`.
+    def _solve_system(self, B: np.ndarray) -> np.ndarray:
+        r"""Solve the system :math:`(X^T X + \alpha I) x = B`.
 
         Parameters
         ----------
@@ -375,15 +381,14 @@ class WoodburyRidgePredictor(AbstractRidgePredictor):
         np.ndarray
             The solution vector :math:`x`.
         """
-        return self.A_inv @ B
+        return self.alpha_inv_ @ B
 
 
-class ShermanMorrisonRidgePredictor(AbstractRidgePredictor):
+class ShermanMorrisonRidgePredictor(BaseRidgePredictor):
     r"""Ridge predictor using the Sherman-Morrison formula for efficient matrix updates.
 
-    This class is suitable for scenarios where the number of features (:math:`p`) is much
-    greater than the number of samples (:math:`n`), leveraging the Sherman-Morrison formula
-    to efficiently update the inverse of (:math:`X^T X + \Lambda`) as :math:`\Lambda` changes.
+    This class is suitable for scenarios where the number of features is much
+    greater than the number of samples.
 
     The Sherman-Morrison formula states:
 
@@ -392,23 +397,28 @@ class ShermanMorrisonRidgePredictor(AbstractRidgePredictor):
 
     where :math:`A` is the current inverse, and :math:`uv^T` represents a rank-one update.
 
+    Parameters
+    ----------
+    X : np.ndarray of shape (n_samples, n_features)
+        Training data.
+
     Attributes
     ----------
-    n : int
+    n_samples_ : int
         Number of samples.
-    p : int
+    n_features_ : int
         Number of features.
-    X : np.ndarray
-        The design matrix.
-    XtX : np.ndarray
-        The regularized :math:`X^T X` matrix.
-    A : np.ndarray
-        The matrix (:math:`I + X^T X`).
-    A_inv : np.ndarray
+    X_ : np.ndarray of shape (n_samples, n_features)
+        The training data.
+    gram_matrix_ : np.ndarray of shape (n_features, n_features)
+        The Gram matrix :math:`X^T X`.
+    A_ : np.ndarray of shape (n_features, n_features)
+        The matrix :math:`I + X^T X`.
+    A_inv_ : np.ndarray of shape (n_features, n_features)
         The inverse of matrix :math:`A`.
-    U : np.ndarray
+    U_ : np.ndarray of shape (n_features, n_samples)
         Matrix :math:`U` used for efficiency in updates.
-    V : np.ndarray
+    V_ : np.ndarray of shape (n_samples, n_features)
         Matrix :math:`V` used for efficiency in updates.
     """
 
@@ -417,8 +427,8 @@ class ShermanMorrisonRidgePredictor(AbstractRidgePredictor):
 
         Parameters
         ----------
-        X : np.ndarray
-            The design matrix.
+        X : np.ndarray of shape (n_samples, n_features)
+            Training data.
 
         Raises
         ------
@@ -432,45 +442,45 @@ class ShermanMorrisonRidgePredictor(AbstractRidgePredictor):
         if np.any(np.isnan(X)) or np.any(np.isinf(X)):
             raise ValueError("X contains NaN or infinity values.")
 
-        self.n, self.p = X.shape
-        self.X = X
-        self.XtX = self.X.T @ self.X / self.n
-        self.A = np.eye(self.p) + self.XtX  # A = I + XtX
-        self.A_inv = np.linalg.inv(self.A)  # Initialize A_inv as inv(A)
-        self.U = self.X.T / np.sqrt(self.n)  # Precompute for efficiency
-        self.V = self.X / np.sqrt(self.n)
+        self.n_samples_, self.n_features_ = X.shape
+        self.X_ = X
+        self.gram_matrix_ = self.X_.T @ X / self.n_samples_
+        self.A_ = np.eye(self.n_features_) + self.gram_matrix_
+        self.A_inv_ = np.linalg.inv(self.A_)
+        self.U_ = self.X_.T / np.sqrt(self.n_samples_)
+        self.V_ = self.X_ / np.sqrt(self.n_samples_)
 
-    def update_lambda_s(self, groups: GroupedFeatures, lambdas: np.ndarray):
-        r"""Update the regularization parameters (:math:`\lambda`) and adjust A_inv accordingly.
+    def set_params(self, groups: GroupedFeatures, alpha: np.ndarray):
+        r"""Update the regularization parameters and adjust A_inv_ accordingly.
 
         Parameters
         ----------
         groups : GroupedFeatures
             The grouped features object.
-        lambdas : np.ndarray
-            The new :math:`\lambda` values for each group.
+        alpha : np.ndarray
+            The new :math:`\alpha` values for each group.
 
         Raises
         ------
         ValueError
-            If lambdas contain negative values.
+            If alpha contains negative values.
 
         Returns
         -------
         None
         """
-        if np.any(lambdas < 0):
-            raise ValueError("Lambda values must be non-negative.")
+        if np.any(alpha < 0):
+            raise ValueError("Alpha values must be non-negative.")
 
-        diag = groups.group_expand(lambdas)
-        self.A = np.diag(diag) + self.XtX  # Update A with new Lambda
+        diag = groups.group_expand(alpha)
+        self.A_ = np.diag(diag) + self.gram_matrix_
         try:
-            self.A_inv = np.linalg.inv(self.A)  # Recompute A_inv
+            self.A_inv_ = np.linalg.inv(self.A_)
         except np.linalg.LinAlgError:
             raise SingularMatrixError("Failed to invert A. Matrix may be singular.")
 
-    def sherman_morrison(self, u: np.ndarray, v: np.ndarray):
-        """Apply the Sherman-Morrison formula to update A_inv with a rank-one update.
+    def _sherman_morrison_update(self, u: np.ndarray, v: np.ndarray):
+        """Apply the Sherman-Morrison formula to update A_inv_ with a rank-one update.
 
         Parameters
         ----------
@@ -488,37 +498,37 @@ class ShermanMorrisonRidgePredictor(AbstractRidgePredictor):
         -------
         None
         """
-        Au = self.A_inv @ u
-        vA = v @ self.A_inv
+        Au = self.A_inv_ @ u
+        vA = v @ self.A_inv_
         denominator = 1.0 + v @ Au
         if abs(denominator) < 1e-10:
             raise NumericalInstabilityError(
                 "Denominator in Sherman-Morrison update is close to zero."
             )
-        self.A_inv -= np.outer(Au, vA) / denominator
+        self.A_inv_ -= np.outer(Au, vA) / denominator
 
-    def trace_XtX(self) -> float:
-        r"""Compute the trace of :math:`X^T X`.
+    def _trace_gram_matrix(self) -> float:
+        r"""Compute the trace of the Gram matrix.
 
         Returns
         -------
         float
-            The trace of :math:`X^T X`.
+            The trace of the Gram matrix.
         """
-        return np.trace(self.XtX)
+        return np.trace(self.gram_matrix_)
 
-    def XtXp_lambda_ldiv_XtX(self) -> np.ndarray:
-        r"""Compute :math:`(X^T X + \Lambda)^{-1} X^T X`.
+    def _solve_gram_system(self) -> np.ndarray:
+        r"""Compute :math:`(X^T X + \alpha I)^{-1} X^T X`.
 
         Returns
         -------
         np.ndarray
             The result of the computation.
         """
-        return self.ldiv(self.XtX)
+        return self._solve_system(self.gram_matrix_)
 
-    def ldiv(self, B: np.ndarray) -> np.ndarray:
-        r"""Solve the system :math:`(X^T X + \Lambda)^{-1} B` using the precomputed A_inv.
+    def _solve_system(self, B: np.ndarray) -> np.ndarray:
+        r"""Solve the system :math:`(X^T X + \alpha I)^{-1} B` using the precomputed A_inv_.
 
         Parameters
         ----------
@@ -531,15 +541,15 @@ class ShermanMorrisonRidgePredictor(AbstractRidgePredictor):
             The solution vector :math:`x`.
         """
         if B.ndim == 1:
-            return self.A_inv @ B
+            return self.A_inv_ @ B
         else:
-            return self.A_inv @ B
+            return self.A_inv_ @ B
 
     @staticmethod
-    def sherman_morrison_formula(
+    def _sherman_morrison_formula(
         A: np.ndarray, u: np.ndarray, v: np.ndarray
     ) -> np.ndarray:
-        """Apply the Sherman-Morrison formula to matrix :math:`A` with vectors :math:`u` and :math:`v`.
+        """Apply the Sherman-Morrison formula to matrix A with vectors u and v.
 
         Parameters
         ----------
@@ -568,182 +578,178 @@ class ShermanMorrisonRidgePredictor(AbstractRidgePredictor):
         return A - np.outer(Au, vA) / denominator
 
 
-class BasicGroupRidgeWorkspace:
-    r"""Workspace for performing group Ridge regression, including fitting and prediction.
+class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
+    r"""Ridge regression with grouped features.
 
-    This class manages the entire workflow of group-wise Ridge regression, handling
-    the fitting process, parameter updates, predictions, and evaluation metrics. It
-    leverages Ridge predictors (`CholeskyRidgePredictor`, `WoodburyRidgePredictor`,
-    `ShermanMorrisonRidgePredictor`) based on the dimensionality of the data to ensure
-    computational efficiency.
+    This class implements Ridge regression with feature groups, automatically selecting
+    the most efficient solver based on the problem dimensions. It supports Cholesky
+    decomposition for n_samples > n_features, Woodbury identity for moderate-sized
+    problems, and Sherman-Morrison updates for very high-dimensional problems.
+
+    Parameters
+    ----------
+    groups : GroupedFeatures
+        The grouped features object.
+    alpha : Union[np.ndarray, dict], default=None
+        The regularization parameters. Can be a numpy array or a dictionary
+        mapping group names to :math:`\alpha` values. If None, uses ones.
 
     Attributes
     ----------
-    X : np.ndarray
-        The design matrix.
-    Y : np.ndarray
-        The target vector.
-    groups : GroupedFeatures
-        The grouped features object.
-    n : int
+    n_features_in_ : int
+        Number of features seen during fit.
+    feature_names_in_ : ndarray of shape (n_features_in_,)
+        Names of features seen during fit.
+    n_samples_ : int
         Number of samples.
-    p : int
+    n_features_ : int
         Number of features.
-    predictor : AbstractRidgePredictor
+    groups_ : GroupedFeatures
+        The grouped features object.
+    predictor_ : BaseRidgePredictor
         The Ridge predictor being used.
-    XtY : np.ndarray
-        The :math:`X^T Y` matrix scaled by the number of samples.
-    lambdas : np.ndarray
+    gram_target_ : np.ndarray of shape (n_features,)
+        The :math:`X^T y` matrix scaled by n_samples.
+    alpha_ : np.ndarray of shape (n_groups,)
         Regularization parameters for each group.
-    beta_current : np.ndarray
-        Current coefficient estimates.
-    Y_hat : np.ndarray
-        Predicted values.
-    XtXp_lambda_inv : np.ndarray
-        Inverse of (:math:`X^T X + \Lambda`).
-    moment_setup : MomentTunerSetup
-        Moment setup for parameter tuning.
-    leverage_store : np.ndarray
+    coef_ : np.ndarray of shape (n_features,)
+        Coefficient vector.
+    leverage_ : np.ndarray of shape (n_samples,)
         Leverage scores for each sample.
+
+    Notes
+    -----
+    The solver selection is based on the following rules:
+    - If n_features <= n_samples: Use Cholesky decomposition
+    - If n_samples < n_features < 4 * n_samples: Use Woodbury identity
+    - If n_features >= 4 * n_samples: Use Sherman-Morrison updates
     """
 
-    def __init__(self, X: np.ndarray, Y: np.ndarray, groups: GroupedFeatures):
-        """Initialize the BasicGroupRidgeWorkspace.
+    def __init__(self, groups: GroupedFeatures, alpha: Union[np.ndarray, dict] = None):
+        self.groups = groups
+        self.alpha = alpha
 
-        Parameters
-        ----------
-        X : np.ndarray
-            The design matrix.
-        Y : np.ndarray
-            The target vector.
-        groups : GroupedFeatures
-            The grouped features object.
+    def _validate_params(self):
+        """Validate parameters.
 
         Raises
         ------
         ValueError
-            If `groups` does not contain any groups or if any group has zero size.
+            If groups does not contain any groups or if any group has zero size.
         """
-        if not groups.ps:
+        if not self.groups.ps:
             raise ValueError("GroupedFeatures must contain at least one group.")
-        if any(p == 0 for p in groups.ps):
+        if any(p == 0 for p in self.groups.ps):
             raise ValueError("GroupedFeatures groups must have non-zero sizes.")
-        self.X = X
-        self.Y = Y
-        self.groups = groups
-        self.n, self.p = X.shape
 
-        # Initialize predictor based on p and n
-        if self.p <= self.n:
-            self.predictor = CholeskyRidgePredictor(X)
-        elif self.p > self.n and self.p < 4 * self.n:
-            self.predictor = WoodburyRidgePredictor(X)
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """Fit the Ridge regression model.
+
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+            Training data.
+        y : np.ndarray of shape (n_samples,)
+            Target values.
+
+        Returns
+        -------
+        self : object
+            Returns self.
+        """
+        self._validate_params()
+        X, y = check_X_y(X, y, accept_sparse=False)
+        self.y_ = y  # Store y for later use
+
+        self.n_features_in_ = X.shape[1]
+        self.n_samples_, self.n_features_ = X.shape
+        self.groups_ = self.groups
+
+        # Initialize predictor based on problem dimensions
+        if self.n_features_ <= self.n_samples_:
+            self.predictor_ = CholeskyRidgePredictor(X)
+        elif self.n_features_ > self.n_samples_ and self.n_features_ < 4 * self.n_samples_:
+            self.predictor_ = WoodburyRidgePredictor(X)
         else:
-            self.predictor = ShermanMorrisonRidgePredictor(X)
+            self.predictor_ = ShermanMorrisonRidgePredictor(X)
 
-        self.XtY = np.dot(X.T, Y) / self.n
-        self.lambdas = np.ones(groups.num_groups)
-        self.update_lambda_s(self.lambdas)
-        self.beta_current = self.predictor.ldiv(self.XtY)
-        self.Y_hat = np.dot(X, self.beta_current)
+        self.gram_target_ = np.dot(X.T, y) / self.n_samples_
 
-        # Compute (:math:`X^T X + \Lambda`)^{-1}
-        self.XtXp_lambda_inv = self.predictor.ldiv(np.eye(self.p))
+        # Set alpha values
+        if self.alpha is None:
+            self.alpha_ = np.ones(self.groups.num_groups)
+        elif isinstance(self.alpha, dict):
+            self.alpha_ = np.array(list(self.alpha.values()))
+        else:
+            self.alpha_ = np.asarray(self.alpha)
 
-        self.moment_setup = MomentTunerSetup(self)
+        self.predictor_.set_params(self.groups_, self.alpha_)
+        self.coef_ = self.predictor_._solve_system(self.gram_target_)
+        self.y_pred_ = np.dot(X, self.coef_)
 
-    def update_lambda_s(self, lambdas: np.ndarray):
-        r"""Update the regularization parameters (:math:`\lambda`).
+        # Store gram_reg_inv_ for MomentTunerSetup
+        self.gram_reg_inv_ = self.predictor_._solve_system(np.eye(self.n_features_))
 
-        Parameters
-        ----------
-        lambdas : np.ndarray
-            New :math:`\lambda` values for each group.
+        # Compute leverage scores
+        self.gram_reg_inv_X_ = (
+            self.predictor_._solve_system(X.T).T / self.n_samples_
+        )
+        self.leverage_ = np.sum(X * self.gram_reg_inv_X_, axis=1)
 
-        Returns
-        -------
-        None
-        """
-        self.lambdas = lambdas
-        self.predictor.update_lambda_s(self.groups, self.lambdas)
-        self.XtXp_lambda_div_Xt = self.predictor.ldiv(self.X.T)
+        return self
 
-    def ngroups(self) -> int:
-        """Get the number of feature groups.
-
-        Returns
-        -------
-        int
-            Number of groups.
-        """
-        return self.groups.ngroups()
-
-    def coef(self) -> np.ndarray:
-        """Get the current coefficient estimates (:math:`\beta`).
-
-        Returns
-        -------
-        np.ndarray
-            Coefficient vector :math:`\beta`.
-        """
-        return self.beta_current
-
-    def islinear(self) -> bool:
-        """Check if the model is linear.
-
-        Returns
-        -------
-        bool
-            Always returns True for Ridge regression.
-        """
-        return True
-
-    def leverage(self) -> np.ndarray:
-        """Get the leverage scores (:math:`h_i`).
-
-        Returns
-        -------
-        np.ndarray
-            Leverage scores vector.
-        """
-        return self.leverage_store
-
-    def modelmatrix(self) -> np.ndarray:
-        """Get the design matrix (:math:`X`).
-
-        Returns
-        -------
-        np.ndarray
-            Design matrix :math:`X`.
-        """
-        return self.X
-
-    def predict(self, X_new: np.ndarray) -> np.ndarray:
-        """Make predictions for new data.
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Predict using the Ridge regression model.
 
         Parameters
         ----------
-        X_new : np.ndarray
-            New design matrix.
+        X : np.ndarray of shape (n_samples_new, n_features)
+            New data.
 
         Returns
         -------
-        np.ndarray
+        np.ndarray of shape (n_samples_new,)
             Predicted values.
         """
-        return np.dot(X_new, self.coef())
+        X = check_array(X, accept_sparse=False)
+        return np.dot(X, self.coef_)
 
-    def response(self) -> np.ndarray:
-        """Get the response variable (:math:`Y`).
+    def get_params(self, deep: bool = True) -> Dict[str, Any]:
+        """Get parameters for this estimator.
+
+        Parameters
+        ----------
+        deep : bool, default=True
+            If True, will return the parameters for this estimator and
+            contained subobjects that are estimators.
 
         Returns
         -------
-        np.ndarray
-            Response vector :math:`Y`.
+        params : Dict[str, Any]
+            Parameter names mapped to their values.
         """
-        return self.Y
+        return {"groups": self.groups, "alpha": self.alpha}
 
-    def loo_error(self) -> float:
+    def set_params(self, **params) -> "GroupRidgeRegressor":
+        """Set the parameters of this estimator.
+
+        Parameters
+        ----------
+        **params : dict
+            Estimator parameters.
+
+        Returns
+        -------
+        self : object
+            Estimator instance.
+        """
+        if "groups" in params:
+            self.groups = params["groups"]
+        if "alpha" in params:
+            self.alpha = params["alpha"]
+        return self
+
+    def get_loo_error(self) -> float:
         """Compute the leave-one-out (LOO) error.
 
         Returns
@@ -751,16 +757,16 @@ class BasicGroupRidgeWorkspace:
         float
             The computed LOO error.
         """
-        return np.mean((self.Y - self.Y_hat) ** 2 / (1.0 - self.leverage_store) ** 2)
+        return np.mean((self.y_ - self.y_pred_) ** 2 / (1.0 - self.leverage_) ** 2)
 
-    def mse_ridge(self, X_test: np.ndarray, Y_test: np.ndarray) -> float:
+    def get_mse(self, X_test: np.ndarray, y_test: np.ndarray) -> float:
         """Compute the mean squared error (MSE) on test data.
 
         Parameters
         ----------
-        X_test : np.ndarray
+        X_test : np.ndarray of shape (n_samples_test, n_features)
             Test design matrix.
-        Y_test : np.ndarray
+        y_test : np.ndarray of shape (n_samples_test,)
             Test response vector.
 
         Returns
@@ -768,89 +774,46 @@ class BasicGroupRidgeWorkspace:
         float
             The computed MSE.
         """
-        return np.mean((Y_test - np.dot(X_test, self.beta_current)) ** 2)
-
-    def fit(self, lambdas: Union[np.ndarray, dict]):
-        r"""Fit the Ridge regression model with given regularization parameters.
-
-        Parameters
-        ----------
-        lambdas : Union[np.ndarray, dict]
-            The regularization parameters. Can be a numpy array or a dictionary
-            mapping group names to :math:`\lambda` values.
-
-        Returns
-        -------
-        float
-            The leave-one-out (LOO) error after fitting.
-
-        Raises
-        ------
-        ValueError
-            If the provided lambdas are invalid.
-        """
-        if isinstance(lambdas, dict):
-            lambdas = np.array(list(lambdas.values()))
-        self.lambdas = lambdas
-        self.predictor.update_lambda_s(self.groups, self.lambdas)
-        self.beta_current = self.predictor.ldiv(self.XtY)
-        self.Y_hat = np.dot(self.X, self.beta_current)
-        self.XtXp_lambda_div_Xt = self.predictor.ldiv(self.X.T).T / self.n
-        self.leverage_store = np.sum(self.X * self.XtXp_lambda_div_Xt, axis=1)
-        return self.loo_error()
+        X_test = check_array(X_test, accept_sparse=False)
+        return np.mean((y_test - self.predict(X_test)) ** 2)
 
 
-def lambda_lolas_rule(rdg: BasicGroupRidgeWorkspace, multiplier: float = 0.1) -> float:
-    r"""Compute the regularization parameter :math:`\lambda` using the Panagiotis Lolas rule.
+def lambda_lolas_rule(rdg: GroupRidgeRegressor, multiplier: float = 0.1) -> float:
+    r"""Compute the regularization parameter using the Panagiotis Lolas rule.
 
     The Lolas rule provides a heuristic for selecting the regularization parameter
-    based on the model's degrees of freedom and the trace of :math:`X^T X`. This method
-    balances the complexity of the model against its fit to the training data.
+    based on the model's degrees of freedom and the trace of :math:`X^T X`.
 
-    The :math:`\lambda` is computed as:
+    The :math:`\alpha` is computed as:
 
     .. math::
-        \lambda = \text{multiplier} \times \frac{p^2}{n \times \text{trace}(X^T X)}
-
-    where:
-    - multiplier : float, default=0.1
-        A scalar multiplier for the rule.
-    - :math:`p` : int
-        Number of features.
-    - :math:`n` : int
-        Number of samples.
-    - :math:`\text{trace}(X^T X)` : float
-        The trace of the covariance matrix :math:`X^T X`.
-
-    This formula scales the regularization parameter based on both the
-    dimensionality of the data and the trace of the covariance matrix, ensuring
-    that :math:`\lambda` is appropriately tuned for the given dataset.
+        \alpha = \text{multiplier} \times \frac{n_{\text{features}}^2}{n_{\text{samples}} \times \text{trace}(X^T X)}
 
     Parameters
     ----------
-    rdg : BasicGroupRidgeWorkspace
-        The Ridge regression workspace containing model parameters.
+    rdg : GroupRidgeRegressor
+        The Ridge regression estimator.
     multiplier : float, default=0.1
         A scalar multiplier for the rule.
 
     Returns
     -------
     float
-        The computed :math:`\lambda` value.
+        The computed :math:`\alpha` value.
 
     Raises
     ------
     ValueError
-        If multiplier is not positive or if :math:`\text{trace}(X^T X)` is zero.
+        If multiplier is not positive or if trace(X^T X) is zero.
     """
     if multiplier <= 0:
         raise ValueError("Multiplier must be positive.")
 
-    trace_XtX = rdg.predictor.trace_XtX()
-    if trace_XtX == 0:
+    trace_gram = rdg.predictor_._trace_gram_matrix()
+    if trace_gram == 0:
         raise ValueError("Trace of X^T X is zero, leading to division by zero.")
 
-    return multiplier * rdg.p**2 / rdg.n / trace_XtX
+    return multiplier * rdg.n_features_**2 / rdg.n_samples_ / trace_gram
 
 
 class MomentTunerSetup:
@@ -877,41 +840,30 @@ class MomentTunerSetup:
         :math:`M^2` matrix computed as (:math:`p_s \times p_s^T) / n^2`.
     """
 
-    def __init__(self, rdg: BasicGroupRidgeWorkspace):
-        """
-        Initialize the MomentTunerSetup.
-
-        Parameters
-        ----------
-        rdg : BasicGroupRidgeWorkspace
-            An instance of BasicGroupRidgeWorkspace containing the model's current
-            state.
-
-        Raises
-        ------
-        ValueError
-            If the length of N_matrix does not match the number of features.
-        """
-        self.groups = rdg.groups
-        self.ps = np.array(rdg.groups.ps)
-        self.n = rdg.n
-        self.beta_norms_squared = np.array(
-            rdg.groups.group_summary(rdg.beta_current, lambda x: np.sum(np.abs(x) ** 2))
+    def __init__(self, rdg: GroupRidgeRegressor):
+        self.groups_ = rdg.groups_
+        self.n_features_per_group_ = np.array(rdg.groups_.ps)
+        self.n_samples_ = rdg.n_samples_
+        self.coef_norms_squared_ = np.array(
+            rdg.groups_.group_summary(rdg.coef_, lambda x: np.sum(np.abs(x) ** 2))
         )
-        N_matrix = rdg.XtXp_lambda_inv  # Use the (p, p) inverse matrix
-        if N_matrix.shape[1] != self.ps.sum():
+        gram_inv_matrix = rdg.gram_reg_inv_  # Use the (p, p) inverse matrix
+        if gram_inv_matrix.shape[1] != self.n_features_per_group_.sum():
             raise ValueError(
-                f"Length of N_matrix ({N_matrix.shape[1]}) does not match number of "
-                f"features ({self.ps.sum()})"
+                f"Length of gram_inv_matrix ({gram_inv_matrix.shape[1]}) does not match "
+                f"number of features ({self.n_features_per_group_.sum()})"
             )
-        self.N_norms_squared = np.array(
-            rdg.groups.group_summary(N_matrix, lambda x: np.sum(np.abs(x) ** 2))
+        self.gram_inv_norms_squared_ = np.array(
+            rdg.groups_.group_summary(gram_inv_matrix, lambda x: np.sum(np.abs(x) ** 2))
         )
-        self.M_squared = np.outer(self.ps, self.ps) / self.n**2
+        self.moment_matrix_ = (
+            np.outer(self.n_features_per_group_, self.n_features_per_group_)
+            / self.n_samples_**2
+        )
 
 
 def sigma_squared_path(
-    rdg: BasicGroupRidgeWorkspace, mom: MomentTunerSetup, sigma_s_squared: np.ndarray
+    rdg: GroupRidgeRegressor, mom: MomentTunerSetup, sigma_s_squared: np.ndarray
 ):
     r"""Compute the regularization path for different values of :math:`\sigma^2`.
 
@@ -922,37 +874,37 @@ def sigma_squared_path(
 
     For each :math:`\sigma^2` in the provided array:
 
-    1. Compute :math:`\lambda`:
-        :math:`\lambda = \text{get_lambdas}(mom, \sigma^2)`
+    1. Compute :math:`\alpha`:
+        :math:`\alpha = \text{get_lambdas}(mom, \sigma^2)`
 
     2. Fit Ridge Model:
-        Fit the Ridge regression model using the computed :math:`\lambda` and evaluate:
-            LOO Error = rdg.fit(:math:`\lambda`)
+        Fit the Ridge regression model using the computed :math:`\alpha` and evaluate:
+            LOO Error = rdg.fit(:math:`\alpha`)
 
     3. Store Coefficients:
-        :math:`\beta = rdg.beta_current`
+        :math:`\beta = rdg.coef_`
 
     4. Aggregate Results:
-        Collect the :math:`\lambda` values, LOO errors, and :math:`\beta` coefficients for each :math:`\sigma^2`.
+        Collect the :math:`\alpha` values, LOO errors, and coefficients for each :math:`\sigma^2`.
 
     Parameters
     ----------
-    rdg : BasicGroupRidgeWorkspace
-        The Ridge regression workspace.
+    rdg : GroupRidgeRegressor
+        The Ridge regression estimator.
     mom : MomentTunerSetup
         The moment tuner setup containing necessary statistics.
-    sigma_s_squared : np.ndarray
+    sigma_s_squared : np.ndarray of shape (n_sigmas,)
         An array of :math:`\sigma^2` values to evaluate.
 
     Returns
     -------
     dict
         A dictionary containing the regularization path information:
-            - 'lambdas' : np.ndarray
-                Array of :math:`\lambda` values for each :math:`\sigma^2`.
-            - 'loos' : np.ndarray
+            - 'alphas' : np.ndarray of shape (n_sigmas, n_groups)
+                Array of :math:`\alpha` values for each :math:`\sigma^2`.
+            - 'errors' : np.ndarray of shape (n_sigmas,)
                 Array of LOO errors corresponding to each :math:`\sigma^2`.
-            - 'betas' : np.ndarray
+            - 'coefs' : np.ndarray of shape (n_sigmas, n_features)
                 Array of coefficient vectors corresponding to each :math:`\sigma^2`.
 
     Raises
@@ -963,29 +915,29 @@ def sigma_squared_path(
     if np.any(sigma_s_squared < 0):
         raise ValueError("sigma_s_squared values must be non-negative.")
 
-    n_sigma = len(sigma_s_squared)
-    n_groups = rdg.ngroups()
-    loos_hat = np.zeros(n_sigma)
-    lambdas = np.zeros((n_sigma, n_groups))
-    betas = np.zeros((n_sigma, rdg.groups.p))
+    n_sigmas = len(sigma_s_squared)
+    n_groups = rdg.get_n_groups()
+    errors = np.zeros(n_sigmas)
+    alphas = np.zeros((n_sigmas, n_groups))
+    coefs = np.zeros((n_sigmas, rdg.groups_.p))
 
     for i, sigma_sq in enumerate(sigma_s_squared):
         try:
-            lambdas_tmp = get_lambdas(mom, sigma_sq)
-            lambdas[i, :] = lambdas_tmp
-            loos_hat[i] = rdg.fit(lambdas_tmp)
-            betas[i, :] = rdg.beta_current
+            alpha_tmp = get_lambdas(mom, sigma_sq)
+            alphas[i, :] = alpha_tmp
+            errors[i] = rdg.fit(alpha_tmp)
+            coefs[i, :] = rdg.coef_
         except RidgeRegressionError as e:
             print(f"Error at :math:`\sigma^2 = {sigma_sq}`: {str(e)}")
 
-    return {"lambdas": lambdas, "loos": loos_hat, "betas": betas}
+    return {"alphas": alphas, "errors": errors, "coefs": coefs}
 
 
 def get_lambdas(mom: MomentTunerSetup, sigma_sq: float) -> np.ndarray:
-    r"""Compute :math:`\lambda` values for a given :math:`\sigma^2`.
+    r"""Compute :math:`\alpha` values for a given :math:`\sigma^2`.
 
-    This function calculates the regularization parameters (:math:`\lambda`) for each
-    feature group based on moment-based statistics. The computed :math:`\lambda` balances
+    This function calculates the regularization parameters (:math:`\alpha`) for each
+    feature group based on moment-based statistics. The computed :math:`\alpha` balances
     the regularization strength across different groups, ensuring that groups with
     more features or higher variance receive appropriate penalization.
 
@@ -994,58 +946,58 @@ def get_lambdas(mom: MomentTunerSetup, sigma_sq: float) -> np.ndarray:
     1. Compute :math:`\alpha^2` for each group:
         :math:`\alpha_g^2 = \max(\|\beta_g\|^2 - \sigma^2 \|N_g\|^2, 0) / p_g`
 
-    2. Compute :math:`\gamma_s` for each group:
-        :math:`\gamma_g = p_g / n`
+    2. Compute group ratios:
+        :math:`r_g = p_g / n`
 
-    3. Compute :math:`\lambda` for each group:
-        :math:`\lambda_g = (\sigma^2 \gamma_g) / \alpha_g^2`
+    3. Compute :math:`\alpha` for each group:
+        :math:`\alpha_g = (\sigma^2 r_g) / \alpha_g^2`
 
     Parameters
     ----------
     mom : MomentTunerSetup
         The moment tuner setup containing necessary statistics.
     sigma_sq : float
-        The :math:`\sigma^2` value for which to compute :math:`\lambda`.
+        The :math:`\sigma^2` value for which to compute :math:`\alpha`.
 
     Returns
     -------
-    np.ndarray
-        The computed :math:`\lambda` values for each feature group.
+    np.ndarray of shape (n_groups,)
+        The computed :math:`\alpha` values for each feature group.
 
     Raises
     ------
     ValueError
         If sigma_sq is negative.
     NumericalInstabilityError
-        If division by zero occurs during lambda computation.
+        If division by zero occurs during alpha computation.
     """
     if sigma_sq < 0:
         raise ValueError("sigma_sq must be non-negative.")
 
-    alpha_sq = get_alpha_s_squared(mom, sigma_sq)
-    gamma_s = np.array(mom.ps) / mom.n
+    alpha_squared = get_alpha_s_squared(mom, sigma_sq)
+    group_ratios = np.array(mom.n_features_per_group_) / mom.n_samples_
 
     LARGE_VALUE = 1e12
 
     with np.errstate(divide="ignore", invalid="ignore"):
-        lambdas = sigma_sq * gamma_s / alpha_sq
-        zero_alpha = alpha_sq == 0
+        alphas = sigma_sq * group_ratios / alpha_squared
+        zero_alpha = alpha_squared == 0
         if np.any(zero_alpha):
             warnings.warn(
-                f"alpha_sq has zero values for groups: {np.where(zero_alpha)[0]}. "
-                "Assigning large lambda values to these groups."
+                f"alpha_squared has zero values for groups: {np.where(zero_alpha)[0]}. "
+                "Assigning large alpha values to these groups."
             )
-        lambdas = np.where(zero_alpha, LARGE_VALUE, lambdas)
+        alphas = np.where(zero_alpha, LARGE_VALUE, alphas)
 
-    return lambdas
+    return alphas
 
 
 def get_alpha_s_squared(mom: MomentTunerSetup, sigma_sq: float) -> np.ndarray:
-    r"""Compute :math:`\alpha_s^2` values for a given :math:`\sigma^2` using Non-Negative Least Squares
+    r"""Compute :math:`\alpha^2` values for a given :math:`\sigma^2` using Non-Negative Least Squares
     (NNLS).
 
-    This function calculates the :math:`\alpha_s^2` values required for determining the
-    regularization parameters (:math:`\lambda`) in Ridge regression. The :math:`\alpha_s^2` values
+    This function calculates the :math:`\alpha^2` values required for determining the
+    regularization parameters (:math:`\alpha`) in Ridge regression. The :math:`\alpha^2` values
     encapsulate the balance between the coefficient norms and the influence of
     the design matrix, adjusted by :math:`\sigma^2`.
 
@@ -1055,46 +1007,46 @@ def get_alpha_s_squared(mom: MomentTunerSetup, sigma_sq: float) -> np.ndarray:
         :math:`\text{RHS}_g = \|\beta_g\|^2 - \sigma^2 \|N_g\|^2`
 
     2. Solve the NNLS problem:
-        :math:`\min \| M_{\text{squared}} \times \alpha_{\text{sq\_by\_p}} - \text{RHS} \|_2^2`
-        subject to :math:`\alpha_{\text{sq\_by\_p}} \geq 0`
+        :math:`\min \| M \times \alpha_{\text{per\_group}} - \text{RHS} \|_2^2`
+        subject to :math:`\alpha_{\text{per\_group}} \geq 0`
 
-    3. Compute :math:`\alpha_g^2`:
-        :math:`\alpha_g^2 = \alpha_{\text{sq\_by\_p}} \times p_g`
+    3. Compute :math:`\alpha^2`:
+        :math:`\alpha^2 = \alpha_{\text{per\_group}} \times p_g`
 
     Parameters
     ----------
     mom : MomentTunerSetup
         The moment tuner setup containing necessary statistics.
     sigma_sq : float
-        The :math:`\sigma^2` value for which to compute :math:`\alpha_s^2`.
+        The :math:`\sigma^2` value for which to compute :math:`\alpha^2`.
 
     Returns
     -------
-    np.ndarray
-        The computed :math:`\alpha_s^2` values for each feature group.
+    np.ndarray of shape (n_groups,)
+        The computed :math:`\alpha^2` values for each feature group.
 
     Raises
     ------
     ValueError
-        If sigma_sq is negative or if any :math:`p_s` is zero.
+        If sigma_sq is negative or if any n_features_per_group is zero.
     NNLSError
         If the NNLS algorithm fails to converge.
     """
     if sigma_sq < 0:
         raise ValueError("sigma_sq must be non-negative.")
-    if np.any(mom.ps == 0):
-        raise ValueError("All p_s values must be non-zero.")
+    if np.any(mom.n_features_per_group_ == 0):
+        raise ValueError("All n_features_per_group values must be non-zero.")
 
     # Compute the right-hand side
-    rhs = mom.beta_norms_squared - sigma_sq * mom.N_norms_squared
+    rhs = mom.coef_norms_squared_ - sigma_sq * mom.gram_inv_norms_squared_
     rhs = np.maximum(rhs, 0)
 
-    # Solve the NNLS problem: M_squared * alpha_sq_by_p ≈ rhs
+    # Solve the NNLS problem: moment_matrix * alpha_per_group ≈ rhs
     try:
-        alpha_sq_by_p = nonneg_lsq(mom.M_squared, rhs, alg="fnnls")
+        alpha_per_group = nonneg_lsq(mom.moment_matrix_, rhs, alg="fnnls")
     except NNLSError as e:
-        raise NNLSError(f"Failed to compute alpha_s_squared: {str(e)}")
+        raise NNLSError(f"Failed to compute alpha_squared: {str(e)}")
 
-    alpha_s_squared = alpha_sq_by_p * mom.groups.ps
+    alpha_squared = alpha_per_group * mom.n_features_per_group_
 
-    return alpha_s_squared
+    return alpha_squared
