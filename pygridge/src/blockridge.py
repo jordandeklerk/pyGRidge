@@ -15,21 +15,25 @@ T = TypeVar("T")
 
 class RidgeRegressionError(Exception):
     """Base exception class for Ridge regression errors."""
+
     pass
 
 
 class InvalidDimensionsError(RidgeRegressionError):
     """Exception raised when matrix dimensions are incompatible."""
+
     pass
 
 
 class SingularMatrixError(RidgeRegressionError):
     """Exception raised when a matrix is singular or nearly singular."""
+
     pass
 
 
 class NumericalInstabilityError(RidgeRegressionError):
     """Exception raised when numerical instability is detected."""
+
     pass
 
 
@@ -163,7 +167,15 @@ class CholeskyRidgePredictor(BaseRidgePredictor):
 
         self.n_samples_, self.n_features_ = X.shape
         self.gram_matrix_ = np.dot(X.T, X) / self.n_samples_
-        self.gram_reg_ = self.gram_matrix_ + np.eye(self.n_features_)
+
+        # Check if gram matrix is nearly singular
+        cond = np.linalg.cond(self.gram_matrix_)
+        if cond > 1e15:
+            raise SingularMatrixError(
+                f"Gram matrix is nearly singular with condition number: {cond}"
+            )
+
+        self.gram_reg_ = self.gram_matrix_.copy()
         self._update_cholesky()
         self.lower_ = True
 
@@ -179,25 +191,20 @@ class CholeskyRidgePredictor(BaseRidgePredictor):
             self.gram_reg_chol_ = np.linalg.cholesky(self.gram_reg_)
         except np.linalg.LinAlgError:
             raise SingularMatrixError(
-                "Failed to compute Cholesky decomposition. Matrix may not be positive "
-                "definite."
+                "Failed to compute Cholesky decomposition. Matrix may not be positive definite."
             )
 
     def set_params(self, groups: GroupedFeatures, alpha: np.ndarray):
-        r"""Update the regularization parameters and recompute the Cholesky decomposition.
-
-        Parameters
-        ----------
-        groups : GroupedFeatures
-            The grouped features object.
-        alpha : np.ndarray
-            The new :math:`\alpha` values for each group.
-
-        Returns
-        -------
-        None
-        """
         diag = groups.group_expand(alpha)
+        if not isinstance(diag, np.ndarray):
+            diag = np.array(diag)
+
+        # Ensure diag has the correct shape
+        if len(diag) != self.n_features_:
+            raise ValueError(
+                f"Alpha expansion length ({len(diag)}) must match the number of features ({self.n_features_})"
+            )
+
         self.gram_reg_ = self.gram_matrix_ + np.diag(diag)
         self._update_cholesky()
 
@@ -300,6 +307,14 @@ class WoodburyRidgePredictor(BaseRidgePredictor):
         self.n_samples_, self.n_features_ = X.shape
         self.X_ = X
         self.gram_matrix_ = X.T @ X
+
+        # Check if gram matrix is nearly singular
+        cond = np.linalg.cond(self.gram_matrix_)
+        if cond > 1e15:
+            raise SingularMatrixError(
+                f"Gram matrix is nearly singular with condition number: {cond}"
+            )
+
         self.alpha_inv_ = np.eye(self.n_features_)
         self.U_ = X.T
         self.V_ = X
@@ -327,6 +342,11 @@ class WoodburyRidgePredictor(BaseRidgePredictor):
             raise ValueError("Alpha values must be positive.")
 
         diag = np.array(groups.group_expand(alpha))
+        if len(diag) != self.n_features_:
+            raise ValueError(
+                f"Alpha expansion length ({len(diag)}) must match the number of features ({self.n_features_})"
+            )
+
         self.alpha_inv_ = np.diag(1 / diag)
         self._woodbury_update()
 
@@ -445,6 +465,14 @@ class ShermanMorrisonRidgePredictor(BaseRidgePredictor):
         self.n_samples_, self.n_features_ = X.shape
         self.X_ = X
         self.gram_matrix_ = self.X_.T @ X / self.n_samples_
+
+        # Check if gram matrix is nearly singular
+        cond = np.linalg.cond(self.gram_matrix_)
+        if cond > 1e15:
+            raise SingularMatrixError(
+                f"Gram matrix is nearly singular with condition number: {cond}"
+            )
+
         self.A_ = np.eye(self.n_features_) + self.gram_matrix_
         self.A_inv_ = np.linalg.inv(self.A_)
         self.U_ = self.X_.T / np.sqrt(self.n_samples_)
@@ -473,8 +501,19 @@ class ShermanMorrisonRidgePredictor(BaseRidgePredictor):
             raise ValueError("Alpha values must be non-negative.")
 
         diag = groups.group_expand(alpha)
+        if len(diag) != self.n_features_:
+            raise ValueError(
+                f"Alpha expansion length ({len(diag)}) must match the number of features ({self.n_features_})"
+            )
+
         self.A_ = np.diag(diag) + self.gram_matrix_
         try:
+            # Check condition number before inversion
+            cond = np.linalg.cond(self.A_)
+            if cond > 1e15:
+                raise SingularMatrixError(
+                    f"Matrix is nearly singular with condition number: {cond}"
+                )
             self.A_inv_ = np.linalg.inv(self.A_)
         except np.linalg.LinAlgError:
             raise SingularMatrixError("Failed to invert A. Matrix may be singular.")
@@ -659,16 +698,26 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         """
         self._validate_params()
         X, y = check_X_y(X, y, accept_sparse=False)
-        self.y_ = y  # Store y for later use
+        self.y_ = y
 
         self.n_features_in_ = X.shape[1]
         self.n_samples_, self.n_features_ = X.shape
         self.groups_ = self.groups
 
+        # Validate that groups match features
+        total_features = sum(self.groups.ps)
+        if total_features != self.n_features_:
+            raise ValueError(
+                f"Total features in groups ({total_features}) must match data features ({self.n_features_})"
+            )
+
         # Initialize predictor based on problem dimensions
         if self.n_features_ <= self.n_samples_:
             self.predictor_ = CholeskyRidgePredictor(X)
-        elif self.n_features_ > self.n_samples_ and self.n_features_ < 4 * self.n_samples_:
+        elif (
+            self.n_features_ > self.n_samples_
+            and self.n_features_ < 4 * self.n_samples_
+        ):
             self.predictor_ = WoodburyRidgePredictor(X)
         else:
             self.predictor_ = ShermanMorrisonRidgePredictor(X)
@@ -691,9 +740,7 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         self.gram_reg_inv_ = self.predictor_._solve_system(np.eye(self.n_features_))
 
         # Compute leverage scores
-        self.gram_reg_inv_X_ = (
-            self.predictor_._solve_system(X.T).T / self.n_samples_
-        )
+        self.gram_reg_inv_X_ = self.predictor_._solve_system(X.T).T / self.n_samples_
         self.leverage_ = np.sum(X * self.gram_reg_inv_X_, axis=1)
 
         return self
@@ -778,7 +825,7 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         return np.mean((y_test - self.predict(X_test)) ** 2)
 
 
-def lambda_lolas_rule(rdg: GroupRidgeRegressor, multiplier: float = 0.1) -> float:
+def lambda_lolas_rule(estimator: GroupRidgeRegressor, multiplier: float = 0.1) -> float:
     r"""Compute the regularization parameter using the Panagiotis Lolas rule.
 
     The Lolas rule provides a heuristic for selecting the regularization parameter
@@ -791,10 +838,10 @@ def lambda_lolas_rule(rdg: GroupRidgeRegressor, multiplier: float = 0.1) -> floa
 
     Parameters
     ----------
-    rdg : GroupRidgeRegressor
-        The Ridge regression estimator.
+    estimator : GroupRidgeRegressor
+        The fitted group ridge regression estimator.
     multiplier : float, default=0.1
-        A scalar multiplier for the rule.
+        Scaling factor for the regularization parameter.
 
     Returns
     -------
@@ -804,58 +851,90 @@ def lambda_lolas_rule(rdg: GroupRidgeRegressor, multiplier: float = 0.1) -> floa
     Raises
     ------
     ValueError
-        If multiplier is not positive or if trace(X^T X) is zero.
+        If multiplier is not positive or if the estimator is not fitted.
+        If trace(X^T X) is zero.
     """
-    if multiplier <= 0:
-        raise ValueError("Multiplier must be positive.")
+    if not hasattr(estimator, "predictor_"):
+        raise ValueError("Estimator must be fitted before calling lambda_lolas_rule.")
 
-    trace_gram = rdg.predictor_._trace_gram_matrix()
-    if trace_gram == 0:
+    if not isinstance(multiplier, (int, float)):
+        raise TypeError("multiplier must be a number.")
+    if multiplier <= 0:
+        raise ValueError("multiplier must be positive.")
+
+    trace_gram = estimator.predictor_._trace_gram_matrix()
+    if np.isclose(trace_gram, 0):
         raise ValueError("Trace of X^T X is zero, leading to division by zero.")
 
-    return multiplier * rdg.n_features_**2 / rdg.n_samples_ / trace_gram
+    return multiplier * estimator.n_features_**2 / estimator.n_samples_ / trace_gram
 
 
 class MomentTunerSetup:
-    r"""Setup for the moment-based tuning of regularization parameters.
+    """Setup for moment-based tuning of regularization parameters.
 
-    This class prepares and computes moment-based statistics required for tuning
-    the regularization parameters (:math:`\lambda`) in Ridge regression. By leveraging
-    moments of the coefficients and the design matrix, it facilitates principled
-    selection of :math:`\lambda` values that balance bias and variance.
+    This class prepares the necessary statistics for tuning regularization parameters
+    using moment-based methods. It encapsulates the computation of coefficient norms,
+    gram matrix norms, and moment matrices needed for parameter selection.
+
+    Parameters
+    ----------
+    estimator : GroupRidgeRegressor
+        The fitted group ridge regression estimator.
 
     Attributes
     ----------
-    groups : GroupedFeatures
+    groups_ : GroupedFeatures
         The grouped features object.
-    ps : np.ndarray
-        Array of the number of features in each group.
-    n : int
-        Number of samples.
-    beta_norms_squared : np.ndarray
-        Squared norms of coefficients for each group.
-    N_norms_squared : np.ndarray
-        Squared norms of the :math:`N` matrix for each group.
-    M_squared : np.ndarray
-        :math:`M^2` matrix computed as (:math:`p_s \times p_s^T) / n^2`.
+    n_features_per_group_ : ndarray of shape (n_groups,)
+        Number of features in each group.
+    n_samples_ : int
+        Number of samples in the training data.
+    coef_norms_squared_ : ndarray of shape (n_groups,)
+        Squared L2 norms of coefficients for each group.
+    gram_inv_norms_squared_ : ndarray of shape (n_groups,)
+        Squared Frobenius norms of gram matrix inverse blocks for each group.
+    moment_matrix_ : ndarray of shape (n_groups, n_groups)
+        Matrix of scaled outer products of group sizes.
+
+    Raises
+    ------
+    ValueError
+        If the estimator is not fitted or has incompatible dimensions.
     """
 
-    def __init__(self, rdg: GroupRidgeRegressor):
-        self.groups_ = rdg.groups_
-        self.n_features_per_group_ = np.array(rdg.groups_.ps)
-        self.n_samples_ = rdg.n_samples_
-        self.coef_norms_squared_ = np.array(
-            rdg.groups_.group_summary(rdg.coef_, lambda x: np.sum(np.abs(x) ** 2))
-        )
-        gram_inv_matrix = rdg.gram_reg_inv_  # Use the (p, p) inverse matrix
-        if gram_inv_matrix.shape[1] != self.n_features_per_group_.sum():
+    def __init__(self, estimator: GroupRidgeRegressor):
+        if not hasattr(estimator, "predictor_"):
             raise ValueError(
-                f"Length of gram_inv_matrix ({gram_inv_matrix.shape[1]}) does not match "
-                f"number of features ({self.n_features_per_group_.sum()})"
+                "Estimator must be fitted before MomentTunerSetup initialization."
             )
-        self.gram_inv_norms_squared_ = np.array(
-            rdg.groups_.group_summary(gram_inv_matrix, lambda x: np.sum(np.abs(x) ** 2))
+
+        self.groups_ = estimator.groups_
+        self.n_features_per_group_ = np.array(estimator.groups_.ps)
+        self.n_samples_ = estimator.n_samples_
+
+        # Compute coefficient norms per group
+        self.coef_norms_squared_ = np.array(
+            estimator.groups_.group_summary(
+                estimator.coef_, lambda x: np.sum(np.abs(x) ** 2)
+            )
         )
+
+        # Validate and compute gram matrix inverse norms
+        gram_inv_matrix = estimator.gram_reg_inv_
+        total_features = self.n_features_per_group_.sum()
+        if gram_inv_matrix.shape[1] != total_features:
+            raise ValueError(
+                f"Gram inverse matrix dimension ({gram_inv_matrix.shape[1]}) "
+                f"does not match total features ({total_features})"
+            )
+
+        self.gram_inv_norms_squared_ = np.array(
+            estimator.groups_.group_summary(
+                gram_inv_matrix, lambda x: np.sum(np.abs(x) ** 2)
+            )
+        )
+
+        # Compute moment matrix
         self.moment_matrix_ = (
             np.outer(self.n_features_per_group_, self.n_features_per_group_)
             / self.n_samples_**2
@@ -863,7 +942,11 @@ class MomentTunerSetup:
 
 
 def sigma_squared_path(
-    rdg: GroupRidgeRegressor, mom: MomentTunerSetup, sigma_s_squared: np.ndarray
+    estimator: GroupRidgeRegressor,
+    moment_tuner: MomentTunerSetup,
+    sigma_squared_values: np.ndarray,
+    max_iter: int = 100,
+    tol: float = 1e-4,
 ):
     r"""Compute the regularization path for different values of :math:`\sigma^2`.
 
@@ -889,51 +972,75 @@ def sigma_squared_path(
 
     Parameters
     ----------
-    rdg : GroupRidgeRegressor
-        The Ridge regression estimator.
-    mom : MomentTunerSetup
+    estimator : GroupRidgeRegressor
+        The group ridge regression estimator.
+    moment_tuner : MomentTunerSetup
         The moment tuner setup containing necessary statistics.
-    sigma_s_squared : np.ndarray of shape (n_sigmas,)
-        An array of :math:`\sigma^2` values to evaluate.
+    sigma_squared_values : ndarray of shape (n_values,)
+        Array of noise variance values to evaluate.
+    max_iter : int, default=100
+        Maximum number of iterations for optimization.
+    tol : float, default=1e-4
+        Tolerance for optimization convergence.
 
     Returns
     -------
     dict
-        A dictionary containing the regularization path information:
-            - 'alphas' : np.ndarray of shape (n_sigmas, n_groups)
-                Array of :math:`\alpha` values for each :math:`\sigma^2`.
-            - 'errors' : np.ndarray of shape (n_sigmas,)
-                Array of LOO errors corresponding to each :math:`\sigma^2`.
-            - 'coefs' : np.ndarray of shape (n_sigmas, n_features)
-                Array of coefficient vectors corresponding to each :math:`\sigma^2`.
+        Dictionary containing:
+        - 'alphas': ndarray of shape (n_values, n_groups)
+            Regularization parameters for each sigma squared value.
+        - 'errors': ndarray of shape (n_values,)
+            Leave-one-out errors for each sigma squared value.
+        - 'coefs': ndarray of shape (n_values, n_features)
+            Model coefficients for each sigma squared value.
 
     Raises
     ------
     ValueError
-        If sigma_s_squared contains negative values.
+        If sigma_squared_values contains negative values or
+        if max_iter or tol have invalid values.
     """
-    if np.any(sigma_s_squared < 0):
-        raise ValueError("sigma_s_squared values must be non-negative.")
+    if not isinstance(sigma_squared_values, np.ndarray):
+        sigma_squared_values = np.asarray(sigma_squared_values)
 
-    n_sigmas = len(sigma_s_squared)
-    n_groups = rdg.get_n_groups()
-    errors = np.zeros(n_sigmas)
-    alphas = np.zeros((n_sigmas, n_groups))
-    coefs = np.zeros((n_sigmas, rdg.groups_.p))
+    if np.any(sigma_squared_values < 0):
+        raise ValueError("sigma_squared_values must be non-negative")
 
-    for i, sigma_sq in enumerate(sigma_s_squared):
+    if not isinstance(max_iter, int) or max_iter <= 0:
+        raise ValueError("max_iter must be a positive integer")
+
+    if not isinstance(tol, float) or tol <= 0:
+        raise ValueError("tol must be a positive float")
+
+    n_values = len(sigma_squared_values)
+    n_groups = len(moment_tuner.n_features_per_group_)
+    n_features = moment_tuner.n_features_per_group_.sum()
+
+    # Initialize result arrays
+    alphas = np.zeros((n_values, n_groups))
+    errors = np.zeros(n_values)
+    coefs = np.zeros((n_values, n_features))
+
+    for i, sigma_sq in enumerate(sigma_squared_values):
         try:
-            alpha_tmp = get_lambdas(mom, sigma_sq)
-            alphas[i, :] = alpha_tmp
-            errors[i] = rdg.fit(alpha_tmp)
-            coefs[i, :] = rdg.coef_
-        except RidgeRegressionError as e:
-            print(f"Error at :math:`\sigma^2 = {sigma_sq}`: {str(e)}")
+            # Compute optimal regularization parameters
+            alpha_values = get_lambdas(moment_tuner, sigma_sq)
+            alphas[i] = alpha_values
+
+            # Fit model and store results
+            estimator.set_params(alpha=alpha_values)
+            estimator.fit(estimator.X_, estimator.y_)
+            errors[i] = estimator.get_loo_error()
+            coefs[i] = estimator.coef_
+
+        except Exception as e:
+            warnings.warn(f"Error at sigma_squared={sigma_sq}: {str(e)}")
+            continue
 
     return {"alphas": alphas, "errors": errors, "coefs": coefs}
 
 
-def get_lambdas(mom: MomentTunerSetup, sigma_sq: float) -> np.ndarray:
+def get_lambdas(moment_tuner: MomentTunerSetup, sigma_squared: float) -> np.ndarray:
     r"""Compute :math:`\alpha` values for a given :math:`\sigma^2`.
 
     This function calculates the regularization parameters (:math:`\alpha`) for each
@@ -954,45 +1061,47 @@ def get_lambdas(mom: MomentTunerSetup, sigma_sq: float) -> np.ndarray:
 
     Parameters
     ----------
-    mom : MomentTunerSetup
+    moment_tuner : MomentTunerSetup
         The moment tuner setup containing necessary statistics.
-    sigma_sq : float
-        The :math:`\sigma^2` value for which to compute :math:`\alpha`.
+    sigma_squared : float
+        The noise variance value.
 
     Returns
     -------
-    np.ndarray of shape (n_groups,)
-        The computed :math:`\alpha` values for each feature group.
+    ndarray of shape (n_groups,)
+        Optimal regularization parameters for each group.
 
     Raises
     ------
     ValueError
-        If sigma_sq is negative.
-    NumericalInstabilityError
-        If division by zero occurs during alpha computation.
+        If sigma_squared is negative.
     """
-    if sigma_sq < 0:
-        raise ValueError("sigma_sq must be non-negative.")
+    if not isinstance(sigma_squared, (int, float)):
+        raise TypeError("sigma_squared must be a number")
+    if sigma_squared < 0:
+        raise ValueError("sigma_squared must be non-negative")
 
-    alpha_squared = get_alpha_s_squared(mom, sigma_sq)
-    group_ratios = np.array(mom.n_features_per_group_) / mom.n_samples_
+    # Compute alpha squared values
+    alpha_squared = get_alpha_s_squared(moment_tuner, sigma_squared)
+    group_ratios = moment_tuner.n_features_per_group_ / moment_tuner.n_samples_
 
+    # Handle numerical stability
     LARGE_VALUE = 1e12
-
     with np.errstate(divide="ignore", invalid="ignore"):
-        alphas = sigma_sq * group_ratios / alpha_squared
-        zero_alpha = alpha_squared == 0
-        if np.any(zero_alpha):
+        lambdas = sigma_squared * group_ratios / alpha_squared
+        zero_mask = np.isclose(alpha_squared, 0)
+        if np.any(zero_mask):
             warnings.warn(
-                f"alpha_squared has zero values for groups: {np.where(zero_alpha)[0]}. "
-                "Assigning large alpha values to these groups."
+                f"Assigning large regularization values to groups: {np.where(zero_mask)[0]}"
             )
-        alphas = np.where(zero_alpha, LARGE_VALUE, alphas)
+        lambdas = np.where(zero_mask, LARGE_VALUE, lambdas)
 
-    return alphas
+    return lambdas
 
 
-def get_alpha_s_squared(mom: MomentTunerSetup, sigma_sq: float) -> np.ndarray:
+def get_alpha_s_squared(
+    moment_tuner: MomentTunerSetup, sigma_squared: float
+) -> np.ndarray:
     r"""Compute :math:`\alpha^2` values for a given :math:`\sigma^2` using Non-Negative Least Squares
     (NNLS).
 
@@ -1015,38 +1124,45 @@ def get_alpha_s_squared(mom: MomentTunerSetup, sigma_sq: float) -> np.ndarray:
 
     Parameters
     ----------
-    mom : MomentTunerSetup
+    moment_tuner : MomentTunerSetup
         The moment tuner setup containing necessary statistics.
-    sigma_sq : float
-        The :math:`\sigma^2` value for which to compute :math:`\alpha^2`.
+    sigma_squared : float
+        The noise variance value.
 
     Returns
     -------
-    np.ndarray of shape (n_groups,)
-        The computed :math:`\alpha^2` values for each feature group.
+    ndarray of shape (n_groups,)
+        Squared alpha values for each group.
 
     Raises
     ------
     ValueError
-        If sigma_sq is negative or if any n_features_per_group is zero.
+        If sigma_squared is negative or if group sizes are invalid.
     NNLSError
-        If the NNLS algorithm fails to converge.
+        If the non-negative least squares optimization fails.
     """
-    if sigma_sq < 0:
-        raise ValueError("sigma_sq must be non-negative.")
-    if np.any(mom.n_features_per_group_ == 0):
-        raise ValueError("All n_features_per_group values must be non-zero.")
+    if not isinstance(sigma_squared, (int, float)):
+        raise TypeError("sigma_squared must be a number")
+    if sigma_squared < 0:
+        raise ValueError("sigma_squared must be non-negative")
 
-    # Compute the right-hand side
-    rhs = mom.coef_norms_squared_ - sigma_sq * mom.gram_inv_norms_squared_
-    rhs = np.maximum(rhs, 0)
+    if np.any(moment_tuner.n_features_per_group_ <= 0):
+        raise ValueError("All group sizes must be positive")
 
-    # Solve the NNLS problem: moment_matrix * alpha_per_group ≈ rhs
+    # Compute right-hand side of the system
+    rhs = (
+        moment_tuner.coef_norms_squared_
+        - sigma_squared * moment_tuner.gram_inv_norms_squared_
+    )
+    rhs = np.maximum(rhs, 0)  # Ensure non-negativity
+
     try:
-        alpha_per_group = nonneg_lsq(mom.moment_matrix_, rhs, alg="fnnls")
+        # Solve non-negative least squares problem
+        alpha_per_group = nonneg_lsq(moment_tuner.moment_matrix_, rhs, alg="fnnls")
     except NNLSError as e:
-        raise NNLSError(f"Failed to compute alpha_squared: {str(e)}")
+        raise NNLSError(f"Non-negative least squares optimization failed: {str(e)}")
 
-    alpha_squared = alpha_per_group * mom.n_features_per_group_
+    # Scale by group sizes
+    alpha_squared = alpha_per_group * moment_tuner.n_features_per_group_
 
     return alpha_squared
