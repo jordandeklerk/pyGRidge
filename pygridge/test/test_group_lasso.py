@@ -80,7 +80,7 @@ def test_feature_weights(simple_problem):
 def test_groups_validation(simple_problem):
     """Test groups validation."""
     X, y, _ = simple_problem
-    
+
     # Wrong number of groups
     groups = np.array([1, 1, 2])  # One feature missing
     clf = GroupLasso(groups=groups)
@@ -91,7 +91,7 @@ def test_groups_validation(simple_problem):
 def test_feature_weights_validation(simple_problem):
     """Test feature weights validation."""
     X, y, groups = simple_problem
-    
+
     # Wrong number of weights
     feature_weights = np.array([0.5, 0.5, 1.0])  # One weight missing
     clf = GroupLasso(groups=groups, feature_weights=feature_weights)
@@ -103,7 +103,9 @@ def test_predict_without_fit(simple_problem):
     """Test prediction without fitting."""
     X, _, groups = simple_problem
     clf = GroupLasso(groups=groups)
-    with pytest.raises(NotFittedError, match="This GroupLasso instance is not fitted yet"):
+    with pytest.raises(
+        NotFittedError, match="This GroupLasso instance is not fitted yet"
+    ):
         clf.predict(X)
 
 
@@ -112,7 +114,7 @@ def test_predict_with_wrong_shape(simple_problem):
     X, y, groups = simple_problem
     clf = GroupLasso(groups=groups)
     clf.fit(X, y)
-    
+
     X_wrong = np.array([[1, 2]])  # Wrong number of features
     with pytest.raises(ValueError, match="X has .* features"):
         clf.predict(X_wrong)
@@ -121,7 +123,7 @@ def test_predict_with_wrong_shape(simple_problem):
 def test_convergence(simple_problem):
     """Test convergence behavior."""
     X, y, groups = simple_problem
-    
+
     # Should converge
     clf = GroupLasso(groups=groups, max_iter=1000, tol=1e-4)
     clf.fit(X, y)
@@ -138,7 +140,7 @@ def test_lambda_path(simple_problem):
     X, y, groups = simple_problem
     clf = GroupLasso(groups=groups, num_intervals=5)
     clf.fit(X, y)
-    
+
     assert len(clf.lambda_path_) == 5
     assert clf.lambda_path_[0] > clf.lambda_path_[-1]  # Should decrease
 
@@ -148,7 +150,7 @@ def test_fixed_effects(simple_problem):
     X, y, groups = simple_problem
     clf = GroupLasso(groups=groups, num_fixed_effects=2)
     clf.fit(X, y)
-    
+
     # First two coefficients should be for fixed effects
     fixed_effects = clf.coef_[:2]
     random_effects = clf.coef_[2:]
@@ -161,7 +163,7 @@ def test_verbose_output(simple_problem, capsys):
     X, y, groups = simple_problem
     clf = GroupLasso(groups=groups, verbose=True, num_intervals=2)
     clf.fit(X, y)
-    
+
     captured = capsys.readouterr()
     assert "Loop: 1 of 2 finished" in captured.out
     assert "Loop: 2 of 2 finished" in captured.out

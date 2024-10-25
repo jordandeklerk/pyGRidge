@@ -40,12 +40,24 @@ def test_invalid_alpha(solver):
 
     with pytest.raises(ValueError, match="alpha must be between 0 and 1"):
         solver.solve(
-            rows, 0.0, left_border, right_border, group_weight, vector_weights, vector_in
+            rows,
+            0.0,
+            left_border,
+            right_border,
+            group_weight,
+            vector_weights,
+            vector_in,
         )
 
     with pytest.raises(ValueError, match="alpha must be between 0 and 1"):
         solver.solve(
-            rows, 1.0, left_border, right_border, group_weight, vector_weights, vector_in
+            rows,
+            1.0,
+            left_border,
+            right_border,
+            group_weight,
+            vector_weights,
+            vector_in,
         )
 
 
@@ -81,7 +93,13 @@ def test_dimension_mismatch(solver):
     vector_in = np.array([0.5, 0.3, 0.2])
     with pytest.raises(ValueError, match="rows must match the length"):
         solver.solve(
-            rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
+            rows,
+            alpha,
+            left_border,
+            right_border,
+            group_weight,
+            vector_weights,
+            vector_in,
         )
 
     # Test with wrong vector_in length
@@ -89,7 +107,13 @@ def test_dimension_mismatch(solver):
     vector_in = np.array([0.5, 0.3])  # length 2 instead of 3
     with pytest.raises(ValueError, match="rows must match the length"):
         solver.solve(
-            rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
+            rows,
+            alpha,
+            left_border,
+            right_border,
+            group_weight,
+            vector_weights,
+            vector_in,
         )
 
 
@@ -106,7 +130,13 @@ def test_convergence_failure():
 
     with pytest.raises(ConvergenceError, match="Bisection did not converge"):
         solver.solve(
-            rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
+            rows,
+            alpha,
+            left_border,
+            right_border,
+            group_weight,
+            vector_weights,
+            vector_in,
         )
 
 
@@ -140,7 +170,7 @@ def test_get_params():
     """Test that get_params works correctly."""
     solver = BisectionSolver(tol=1e-6, max_iter=100, scale_tol=False)
     params = solver.get_params()
-    
+
     assert params["tol"] == 1e-6
     assert params["max_iter"] == 100
     assert params["scale_tol"] is False
@@ -150,7 +180,7 @@ def test_set_params():
     """Test that set_params works correctly."""
     solver = BisectionSolver()
     solver.set_params(tol=1e-6, max_iter=100, scale_tol=False)
-    
+
     assert solver.tol == 1e-6
     assert solver.max_iter == 100
     assert solver.scale_tol is False

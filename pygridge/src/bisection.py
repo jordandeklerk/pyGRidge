@@ -140,16 +140,18 @@ class BisectionSolver(BaseEstimator):
         if left_border >= right_border:
             raise ValueError("left_border must be less than right_border")
 
-        vector_weights = check_array(vector_weights.reshape(1, -1), ensure_2d=True).ravel()
+        vector_weights = check_array(
+            vector_weights.reshape(1, -1), ensure_2d=True
+        ).ravel()
         vector_in = check_array(vector_in.reshape(1, -1), ensure_2d=True).ravel()
 
         if rows != len(vector_weights) or rows != len(vector_in):
-            raise ValueError("rows must match the length of vector_weights and vector_in")
+            raise ValueError(
+                "rows must match the length of vector_weights and vector_in"
+            )
 
         max_value = max(abs(left_border), abs(right_border), np.max(np.abs(vector_in)))
-        tolerance = (
-            max(self.tol, self.tol * max_value) if self.scale_tol else self.tol
-        )
+        tolerance = max(self.tol, self.tol * max_value) if self.scale_tol else self.tol
 
         self.n_iter_ = 0
 
@@ -163,7 +165,9 @@ class BisectionSolver(BaseEstimator):
                 if vector_in[i] < 0.0:
                     temp_left = -vector_in[i] - alpha * left_border * vector_weights[i]
                     temp_mid = -vector_in[i] - alpha * mid_point * vector_weights[i]
-                    temp_right = -vector_in[i] - alpha * right_border * vector_weights[i]
+                    temp_right = (
+                        -vector_in[i] - alpha * right_border * vector_weights[i]
+                    )
                 else:
                     temp_left = vector_in[i] - alpha * left_border * vector_weights[i]
                     temp_mid = vector_in[i] - alpha * mid_point * vector_weights[i]
