@@ -6,8 +6,8 @@ import numpy as np
 from scipy.linalg import cho_solve
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.utils.validation import check_X_y, check_array
-from groupedfeatures import GroupedFeatures
-from nnls import nonneg_lsq, NNLSError
+from .groupedfeatures import GroupedFeatures
+from .nnls import nonneg_lsq, NNLSError
 import warnings
 
 T = TypeVar("T")
