@@ -1,119 +1,156 @@
-import pytest
+"""Tests for the bisection module."""
+
 import numpy as np
-from ..src.bisection import bisection
+import pytest
+from numpy.testing import assert_almost_equal, assert_array_almost_equal
+from pygridge.src.bisection import BisectionSolver, BisectionError, ConvergenceError
 
 
-def test_bisection_basic():
-    """Test basic functionality of bisection."""
-    rows = 5
+@pytest.fixture
+def solver():
+    """Create a BisectionSolver instance for testing."""
+    return BisectionSolver()
+
+
+def test_basic_root_finding(solver):
+    """Test basic root finding functionality."""
+    rows = 3
     alpha = 0.5
     left_border = 0.0
     right_border = 1.0
     group_weight = 1.0
-    vector_weights = np.array([1.0, 1.0, 1.0, 1.0, 1.0])
-    vector_in = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+    vector_weights = np.array([1.0, 1.0, 1.0])
+    vector_in = np.array([0.5, 0.3, 0.2])
 
-    result = bisection(
+    root = solver.solve(
         rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
     )
-    assert 0.0 <= result <= 1.0
+    assert root >= left_border and root <= right_border
+    assert solver.n_iter_ > 0
 
 
-def test_bisection_edge_cases():
-    """Test bisection with alpha at boundary values."""
-    with pytest.raises(ValueError):
-        bisection(5, 0.0, 0.0, 1.0, 1.0, np.ones(5), np.ones(5))
-
-    with pytest.raises(ValueError):
-        bisection(5, 1.0, 0.0, 1.0, 1.0, np.ones(5), np.ones(5))
-
-
-def test_bisection_convergence():
-    """Test convergence of bisection results."""
-    rows = 10
-    alpha = 0.5
+def test_invalid_alpha(solver):
+    """Test that invalid alpha values raise ValueError."""
+    rows = 3
     left_border = 0.0
-    right_border = 10.0
-    group_weight = 1.0
-    vector_weights = np.ones(rows)
-    vector_in = np.arange(rows) / rows
-
-    result1 = bisection(
-        rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
-    )
-    result2 = bisection(
-        rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
-    )
-
-    assert np.isclose(result1, result2)
-
-
-def test_bisection_negative_values():
-    """Test bisection with negative input values."""
-    rows = 5
-    alpha = 0.5
-    left_border = -1.0
     right_border = 1.0
     group_weight = 1.0
-    vector_weights = np.ones(rows)
-    vector_in = np.array([-0.5, -0.2, 0.0, 0.2, 0.5])
+    vector_weights = np.array([1.0, 1.0, 1.0])
+    vector_in = np.array([0.5, 0.3, 0.2])
 
-    result = bisection(
-        rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
-    )
-    assert -1.0 <= result <= 1.0
+    with pytest.raises(ValueError, match="alpha must be between 0 and 1"):
+        solver.solve(
+            rows, 0.0, left_border, right_border, group_weight, vector_weights, vector_in
+        )
+
+    with pytest.raises(ValueError, match="alpha must be between 0 and 1"):
+        solver.solve(
+            rows, 1.0, left_border, right_border, group_weight, vector_weights, vector_in
+        )
 
 
-def test_bisection_large_values():
-    """Test bisection with large input values."""
-    rows = 5
+def test_invalid_borders(solver):
+    """Test that invalid border values raise ValueError."""
+    rows = 3
+    alpha = 0.5
+    group_weight = 1.0
+    vector_weights = np.array([1.0, 1.0, 1.0])
+    vector_in = np.array([0.5, 0.3, 0.2])
+
+    with pytest.raises(ValueError, match="left_border must be less than right_border"):
+        solver.solve(
+            rows, alpha, 1.0, 0.0, group_weight, vector_weights, vector_in
+        )  # left > right
+
+    with pytest.raises(ValueError, match="left_border must be less than right_border"):
+        solver.solve(
+            rows, alpha, 1.0, 1.0, group_weight, vector_weights, vector_in
+        )  # left == right
+
+
+def test_dimension_mismatch(solver):
+    """Test that mismatched dimensions raise ValueError."""
+    rows = 3
     alpha = 0.5
     left_border = 0.0
-    right_border = 1e6
-    group_weight = 1e3
-    vector_weights = np.ones(rows) * 1e3
-    vector_in = np.array([1e3, 1e4, 1e5, 1e6, 1e7])
+    right_border = 1.0
+    group_weight = 1.0
 
-    result = bisection(
-        rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
-    )
-    assert 0.0 <= result <= 1e6
+    # Test with wrong vector_weights length
+    vector_weights = np.array([1.0, 1.0])  # length 2 instead of 3
+    vector_in = np.array([0.5, 0.3, 0.2])
+    with pytest.raises(ValueError, match="rows must match the length"):
+        solver.solve(
+            rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
+        )
+
+    # Test with wrong vector_in length
+    vector_weights = np.array([1.0, 1.0, 1.0])
+    vector_in = np.array([0.5, 0.3])  # length 2 instead of 3
+    with pytest.raises(ValueError, match="rows must match the length"):
+        solver.solve(
+            rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
+        )
 
 
-def test_bisection_small_values():
-    """Test bisection with small input values."""
-    rows = 5
+def test_convergence_failure():
+    """Test that maximum iterations leads to ConvergenceError."""
+    solver = BisectionSolver(max_iter=1)  # Set very low max_iter to force failure
+    rows = 3
     alpha = 0.5
     left_border = 0.0
-    right_border = 1e-6
-    group_weight = 1e-3
-    vector_weights = np.ones(rows) * 1e-3
-    vector_in = np.array([1e-7, 1e-6, 1e-5, 1e-4, 1e-3])
+    right_border = 1.0
+    group_weight = 1.0
+    vector_weights = np.array([1.0, 1.0, 1.0])
+    vector_in = np.array([0.5, 0.3, 0.2])
 
-    result = bisection(
+    with pytest.raises(ConvergenceError, match="Bisection did not converge"):
+        solver.solve(
+            rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
+        )
+
+
+def test_tolerance_scaling(solver):
+    """Test that tolerance scaling works correctly."""
+    rows = 3
+    alpha = 0.5
+    left_border = 0.0
+    right_border = 1000.0  # Large value to test scaling
+    group_weight = 1.0
+    vector_weights = np.array([1.0, 1.0, 1.0])
+    vector_in = np.array([500.0, 300.0, 200.0])  # Large values
+
+    # With scaling
+    solver_with_scaling = BisectionSolver(scale_tol=True)
+    root_scaled = solver_with_scaling.solve(
         rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
     )
-    assert 0.0 <= result <= 1e-6
+
+    # Without scaling
+    solver_without_scaling = BisectionSolver(scale_tol=False)
+    root_unscaled = solver_without_scaling.solve(
+        rows, alpha, left_border, right_border, group_weight, vector_weights, vector_in
+    )
+
+    # The scaled version should converge in fewer iterations
+    assert solver_with_scaling.n_iter_ <= solver_without_scaling.n_iter_
 
 
-def test_bisection_input_validation():
-    """Test input validation for bisection."""
-    rows = 5
-    vector_weights = np.ones(rows)
-    vector_in = np.ones(rows)
-
-    with pytest.raises(ValueError):
-        bisection(rows, -0.1, 0.0, 1.0, 1.0, vector_weights, vector_in)
-
-    with pytest.raises(ValueError):
-        bisection(rows, 1.1, 0.0, 1.0, 1.0, vector_weights, vector_in)
-
-    with pytest.raises(ValueError):
-        bisection(rows, 0.5, 1.0, 0.0, 1.0, vector_weights, vector_in)
-
-    with pytest.raises(ValueError):
-        bisection(rows, 0.5, 0.0, 1.0, 1.0, vector_weights[:-1], vector_in)
+def test_get_params():
+    """Test that get_params works correctly."""
+    solver = BisectionSolver(tol=1e-6, max_iter=100, scale_tol=False)
+    params = solver.get_params()
+    
+    assert params["tol"] == 1e-6
+    assert params["max_iter"] == 100
+    assert params["scale_tol"] is False
 
 
-if __name__ == "__main__":
-    pytest.main()
+def test_set_params():
+    """Test that set_params works correctly."""
+    solver = BisectionSolver()
+    solver.set_params(tol=1e-6, max_iter=100, scale_tol=False)
+    
+    assert solver.tol == 1e-6
+    assert solver.max_iter == 100
+    assert solver.scale_tol is False
