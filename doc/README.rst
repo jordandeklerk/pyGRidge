@@ -1,12 +1,12 @@
-PyGRidge Documentation
+pyGRidge Documentation
 ===================
 
-This directory contains the documentation for PyGRidge, focusing on its integration with scikit-learn and usage examples.
+This directory contains the documentation for pyGRidge, focusing on its integration with scikit-learn and usage examples.
 
 Documentation Structure
 --------------------
 
-- ``sklearn_integration.rst``: Detailed guide on PyGRidge's scikit-learn compatibility
+- ``sklearn_integration.rst``: Detailed guide on pyGRidge's scikit-learn compatibility
 - Additional documentation will be added for:
   - API Reference
   - User Guide
@@ -23,8 +23,6 @@ Examples
 
 For practical examples, please see the ``examples/`` directory, which contains:
 
-- ``pipeline_example.py``: Demonstrates integration with scikit-learn Pipeline
-- ``custom_transformer.py``: Shows how to create custom scikit-learn transformers
 
 Contributing to Documentation
 -------------------------

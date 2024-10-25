@@ -147,14 +147,14 @@ class CovarianceDesign(BaseEstimator, TransformerMixin):
 
     def fit(self, X=None, y=None):
         """Fit the covariance design.
-        
+
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features), default=None
             Training data. Not used, present for API consistency.
         y : Ignored
             Not used, present for API consistency.
-            
+
         Returns
         -------
         self : object
@@ -163,7 +163,7 @@ class CovarianceDesign(BaseEstimator, TransformerMixin):
         if X is not None:
             X = check_array(X)
             self.n_features_in_ = X.shape[1]
-        
+
         self.covariance_ = self.get_Sigma()
         if self.store_precision:
             self.precision_ = np.linalg.pinv(self.covariance_)
@@ -171,12 +171,12 @@ class CovarianceDesign(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         """Transform data using the covariance design.
-        
+
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
             The input samples.
-            
+
         Returns
         -------
         X_transformed : ndarray of shape (n_samples, n_features)
@@ -254,7 +254,7 @@ class AR1Design(CovarianceDesign):
         super().__init__(store_precision=store_precision)
         self.p = p
         self.rho = rho
-        
+
         if p is not None:
             if not isinstance(p, int):
                 raise TypeError(f"'p' must be an integer, got {type(p).__name__}")
@@ -336,7 +336,7 @@ class DiagonalCovarianceDesign(CovarianceDesign):
     def __init__(self, p=None, *, store_precision=True):
         super().__init__(store_precision=store_precision)
         self.p = p
-        
+
         if p is not None:
             if not isinstance(p, int):
                 raise TypeError(f"'p' must be an integer, got {type(p).__name__}")
@@ -453,7 +453,7 @@ class UniformScalingCovarianceDesign(DiagonalCovarianceDesign):
     def __init__(self, scaling=1.0, p=None, *, store_precision=True):
         super().__init__(p=p, store_precision=store_precision)
         self.scaling = scaling
-        
+
         if not isinstance(scaling, (int, float)):
             raise TypeError(f"'scaling' must be a float, got {type(scaling).__name__}")
         if scaling <= 0:
@@ -526,7 +526,7 @@ class ExponentialOrderStatsCovarianceDesign(DiagonalCovarianceDesign):
     def __init__(self, p=None, rate=1.0, *, store_precision=True):
         super().__init__(p=p, store_precision=store_precision)
         self.rate = rate
-        
+
         if not isinstance(rate, (int, float)):
             raise TypeError(f"'rate' must be a float, got {type(rate).__name__}")
         if rate <= 0:
@@ -542,14 +542,14 @@ class ExponentialOrderStatsCovarianceDesign(DiagonalCovarianceDesign):
         """
         if self.p is None:
             raise ValueError("Number of features 'p' is not set.")
-        
+
         p = self.p
         rate = self.rate
-        
+
         tmp = np.linspace(1 / (2 * p), 1 - 1 / (2 * p), p)
         eigs = (1 / rate) * np.log(1 / tmp)
         probs = [1.0 / p] * p
-        
+
         return DiscreteNonParametric(eigs.tolist(), probs)
 
     def get_Sigma(self):
@@ -656,7 +656,7 @@ def block_diag(*arrs):
     out = np.zeros(out_shape, dtype=arrs[0].dtype)
     r, c = 0, 0
     for a in arrs:
-        out[r:r + a.shape[0], c:c + a.shape[1]] = a
+        out[r : r + a.shape[0], c : c + a.shape[1]] = a
         r += a.shape[0]
         c += a.shape[1]
     return out
@@ -799,13 +799,13 @@ class BlockCovarianceDesign(CovarianceDesign):
             Mixture model of block spectra.
         """
         spectra = [block.spectrum() for block in self.blocks]
-        
+
         if self.groups is not None:
             total_p = self.groups.p
             mixing_prop = [ps / total_p for ps in self.groups.ps]
         else:
             mixing_prop = [1.0 / len(spectra)] * len(spectra)
-            
+
         return MixtureModel(spectra, mixing_prop)
 
 

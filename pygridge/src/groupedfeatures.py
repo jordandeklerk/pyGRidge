@@ -148,10 +148,10 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
             Output feature names.
         """
         check_is_fitted(self)
-        
+
         if feature_names_in is None:
             feature_names_in = [f"feature{i}" for i in range(self.n_features_in_)]
-        
+
         if len(feature_names_in) != self.n_features_in_:
             raise ValueError(
                 f"Length of feature_names_in ({len(feature_names_in)}) does not match "
@@ -188,7 +188,7 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
             If `i` is out of range [0, n_groups_ - 1].
         """
         check_is_fitted(self)
-        
+
         if not isinstance(i, int):
             raise TypeError(f"Group index i must be an integer, got {type(i).__name__}")
         if not (0 <= i < self.n_groups_):
@@ -219,7 +219,7 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
             List of summary values, one per group.
         """
         check_is_fitted(self)
-        
+
         if not callable(f):
             raise TypeError("f must be a callable function")
 
@@ -252,7 +252,9 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
                 )
                 summaries.append(f(group_features))
             except Exception as e:
-                raise RuntimeError(f"Error applying function to group {group_range}: {e}")
+                raise RuntimeError(
+                    f"Error applying function to group {group_range}: {e}"
+                )
 
         return summaries
 
@@ -271,7 +273,7 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
             Expanded list of features.
         """
         check_is_fitted(self)
-        
+
         if isinstance(vec_or_num, (int, float)):
             return [vec_or_num] * self.n_features_in_
 
@@ -281,10 +283,10 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
                     f"Length of vec_or_num ({len(vec_or_num)}) does not match number of "
                     f"groups ({self.n_groups_})"
                 )
-            
+
             if isinstance(vec_or_num, np.ndarray):
                 vec_or_num = vec_or_num.tolist()
-                
+
             expanded = []
             for val, group_range in zip(vec_or_num, self.feature_groups_):
                 expanded.extend([val] * len(group_range))

@@ -10,7 +10,7 @@ from ..src.seagull import seagull
 @pytest.fixture
 def sample_data():
     """Create sample data for testing.
-    
+
     Returns
     -------
     tuple
@@ -23,23 +23,25 @@ def sample_data():
     """
     rng = np.random.RandomState(42)
     n_samples = 5
-    
+
     y = np.arange(1, n_samples + 1, dtype=np.float64)
     X = rng.randn(n_samples, 2).astype(np.float64)
-    Z = np.column_stack([
-        np.ones(n_samples),
-        np.arange(1, n_samples + 1),
-        np.arange(1, n_samples + 1) ** 2
-    ]).astype(np.float64)
+    Z = np.column_stack(
+        [
+            np.ones(n_samples),
+            np.arange(1, n_samples + 1),
+            np.arange(1, n_samples + 1) ** 2,
+        ]
+    ).astype(np.float64)
     weights_u = np.ones(3, dtype=np.float64)
     groups = np.array([1, 1, 2, 2, 3], dtype=np.float64)
-    
+
     return y, X, Z, weights_u, groups
 
 
 class TestSeagullInputValidation:
     """Test input validation in seagull."""
-    
+
     def test_missing_y(self):
         """Test if error is raised when y is missing."""
         with pytest.raises(ValueError, match="Vector y is missing"):
@@ -53,7 +55,7 @@ class TestSeagullInputValidation:
     def test_non_numeric_y(self):
         """Test if error is raised when y contains non-numeric values."""
         with pytest.raises(ValueError, match="Non-numeric values detected"):
-            seagull(y=np.array(['a', 'b']), Z=np.array([[1, 2], [3, 4]]))
+            seagull(y=np.array(["a", "b"]), Z=np.array([[1, 2], [3, 4]]))
 
     def test_nan_inf_y(self):
         """Test if error is raised when y contains NaN or Inf."""
@@ -68,7 +70,7 @@ class TestSeagullInputValidation:
     def test_non_numeric_Z(self):
         """Test if error is raised when Z contains non-numeric values."""
         with pytest.raises(ValueError, match="Non-numeric values detected"):
-            seagull(y=np.array([1, 2]), Z=np.array([['a', 'b'], ['c', 'd']]))
+            seagull(y=np.array([1, 2]), Z=np.array([["a", "b"], ["c", "d"]]))
 
     def test_nan_inf_Z(self):
         """Test if error is raised when Z contains NaN or Inf."""
@@ -88,7 +90,7 @@ class TestSeagullEstimator:
         """Test lasso path computation."""
         y, X, Z, weights_u, _ = sample_data
         result = seagull(y=y, X=X, Z=Z, weights_u=weights_u, alpha=1.0)
-        
+
         assert result["result"] == "lasso"
         assert isinstance(result["lambda_values"], np.ndarray)
         assert isinstance(result["beta"], np.ndarray)
@@ -97,9 +99,8 @@ class TestSeagullEstimator:
     def test_group_lasso_path(self, sample_data):
         """Test group lasso path computation."""
         y, X, Z, weights_u, groups = sample_data
-        result = seagull(y=y, X=X, Z=Z, weights_u=weights_u, 
-                        groups=groups, alpha=0.0)
-        
+        result = seagull(y=y, X=X, Z=Z, weights_u=weights_u, groups=groups, alpha=0.0)
+
         assert result["result"] == "group_lasso"
         assert isinstance(result["lambda_values"], np.ndarray)
         assert isinstance(result["beta"], np.ndarray)
@@ -107,9 +108,8 @@ class TestSeagullEstimator:
     def test_sparse_group_lasso_path(self, sample_data):
         """Test sparse group lasso path computation."""
         y, X, Z, weights_u, groups = sample_data
-        result = seagull(y=y, X=X, Z=Z, weights_u=weights_u, 
-                        groups=groups, alpha=0.5)
-        
+        result = seagull(y=y, X=X, Z=Z, weights_u=weights_u, groups=groups, alpha=0.5)
+
         assert result["result"] == "sparse_group_lasso"
         assert isinstance(result["lambda_values"], np.ndarray)
         assert isinstance(result["beta"], np.ndarray)
@@ -137,7 +137,7 @@ class TestSeagullParameters:
     def test_parameter_validation(self, sample_data):
         """Test validation of numerical parameters."""
         y, _, Z, _, _ = sample_data
-        
+
         # Test rel_acc validation
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -162,24 +162,24 @@ class TestSeagullEdgeCases:
 
     def test_single_feature(self):
         """Test with single feature."""
-        y = np.array([1., 2., 3.])
-        Z = np.array([[1.], [2.], [3.]])
+        y = np.array([1.0, 2.0, 3.0])
+        Z = np.array([[1.0], [2.0], [3.0]])
         result = seagull(y=y, Z=Z)
         assert result is not None
         assert isinstance(result, dict)
 
     def test_perfect_fit(self):
         """Test with perfectly correlated data."""
-        y = np.array([1., 2., 3.])
-        Z = np.array([[1., 0.], [2., 0.], [3., 0.]])
+        y = np.array([1.0, 2.0, 3.0])
+        Z = np.array([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
         result = seagull(y=y, Z=Z)
         assert result is not None
         assert isinstance(result, dict)
 
     def test_constant_feature(self):
         """Test with constant feature."""
-        y = np.array([1., 2., 3.])
-        Z = np.array([[1., 1.], [2., 1.], [3., 1.]])
+        y = np.array([1.0, 2.0, 3.0])
+        Z = np.array([[1.0, 1.0], [2.0, 1.0], [3.0, 1.0]])
         result = seagull(y=y, Z=Z)
         assert result is not None
         assert isinstance(result, dict)
