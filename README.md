@@ -1,2 +1,2 @@
-# PyGRidge
+# pyGRidge
 WORK IN PROGRESS
