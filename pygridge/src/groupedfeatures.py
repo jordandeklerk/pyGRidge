@@ -45,6 +45,17 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         self.ps = ps
         self.group_operation = group_operation
 
+    @property
+    def num_groups(self) -> int:
+        """Get the number of groups.
+
+        Returns
+        -------
+        int
+            Number of groups.
+        """
+        return len(self.ps)
+
     def fit(self, X, y=None):
         """Fit the GroupedFeatures transformer.
 

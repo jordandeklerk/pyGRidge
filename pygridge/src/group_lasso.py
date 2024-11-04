@@ -20,6 +20,180 @@ class ConvergenceError(GroupLassoError):
     pass
 
 
+def group_lasso(
+    y: np.ndarray,
+    X: np.ndarray,
+    feature_weights: np.ndarray,
+    groups: np.ndarray,
+    beta: np.ndarray,
+    index_permutation: np.ndarray,
+    epsilon_convergence: float = 1e-4,
+    max_iterations: int = 1000,
+    gamma: float = 0.8,
+    lambda_max: Optional[float] = None,
+    proportion_xi: float = 0.01,
+    num_intervals: int = 50,
+    num_fixed_effects: int = 0,
+    trace_progress: bool = False,
+) -> Dict[str, Any]:
+    """Core group lasso algorithm.
+
+    Parameters
+    ----------
+    y : ndarray of shape (n_samples,)
+        Target values.
+    X : ndarray of shape (n_samples, n_features)
+        Training data.
+    feature_weights : ndarray of shape (n_features,)
+        Weights for the vectors of fixed and random effects.
+    groups : ndarray of shape (n_features,)
+        Integer vector specifying which effect belongs to which group.
+    beta : ndarray of shape (n_features,)
+        Initial coefficient values.
+    index_permutation : ndarray of shape (n_features,)
+        Permutation of feature indices.
+    epsilon_convergence : float, default=1e-4
+        Tolerance for convergence.
+    max_iterations : int, default=1000
+        Maximum number of iterations.
+    gamma : float, default=0.8
+        Line search parameter.
+    lambda_max : float, optional
+        Maximum value for the regularization parameter.
+    proportion_xi : float, default=0.01
+        Minimum value for lambda as a fraction of lambda_max.
+    num_intervals : int, default=50
+        Number of lambda values to use.
+    num_fixed_effects : int, default=0
+        Number of fixed effects.
+    trace_progress : bool, default=False
+        Whether to print progress information.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the results of the optimization.
+    """
+    n, p = X.shape
+
+    # Initialize variables
+    num_groups = np.max(groups)
+    index_start = np.zeros(num_groups, dtype=int)
+    index_end = np.zeros(num_groups, dtype=int)
+    group_sizes = np.zeros(num_groups, dtype=int)
+    group_weights = np.zeros(num_groups)
+
+    # Create vectors of group sizes, start indices, end indices, and group weights
+    for i in range(num_groups):
+        group_mask = groups == (i + 1)
+        group_sizes[i] = np.sum(group_mask)
+        index_start[i] = np.where(group_mask)[0][0]
+        index_end[i] = np.where(group_mask)[0][-1]
+        group_weights[i] = np.sqrt(np.sum(feature_weights[group_mask]))
+
+    # Calculate X.T * y
+    X_transp_y = X.T @ y
+
+    # Initialize result matrices
+    iterations = np.zeros(num_intervals, dtype=int)
+    lambdas = np.zeros(num_intervals)
+    solution = np.zeros((num_intervals, p))
+
+    # Compute lambda_max if not provided
+    if lambda_max is None:
+        lambda_max = lambda_max_group_lasso(
+            y=y,
+            groups=groups,
+            feature_weights=feature_weights,
+            beta=beta.copy(),
+            X=X,
+        )
+
+    for interval in range(num_intervals):
+        accuracy_reached = False
+        counter = 1
+        if num_intervals > 1:
+            lambda_val = lambda_max * np.exp(
+                (interval / (num_intervals - 1)) * np.log(proportion_xi)
+            )
+        else:
+            lambda_val = lambda_max
+
+        while (not accuracy_reached) and (counter <= max_iterations):
+            # Calculate gradient
+            beta_col = beta.reshape(-1, 1)
+            gradient = (X.T @ (X @ beta_col).flatten() - X_transp_y) / n
+
+            criterion_fulfilled = False
+            time_step = 1.0
+
+            while not criterion_fulfilled:
+                beta_new = np.zeros_like(beta)
+
+                # Soft-scaling in groups
+                for i in range(num_groups):
+                    start, end = index_start[i], index_end[i] + 1
+                    temp = beta[start:end] - time_step * gradient[start:end]
+                    l2_norm = np.linalg.norm(temp)
+                    threshold = time_step * lambda_val * group_weights[i]
+
+                    if l2_norm > threshold:
+                        scaling = 1.0 - threshold / l2_norm
+                        beta_new[start:end] = scaling * temp
+
+                # Check convergence
+                beta_diff = beta - beta_new
+                loss_old = 0.5 * np.sum((y - X @ beta) ** 2) / n
+                loss_new = 0.5 * np.sum((y - X @ beta_new) ** 2) / n
+
+                if loss_new <= loss_old - np.dot(gradient, beta_diff) + (
+                    0.5 / time_step
+                ) * np.sum(beta_diff**2):
+                    if np.max(
+                        np.abs(beta_diff)
+                    ) <= epsilon_convergence * np.linalg.norm(beta):
+                        accuracy_reached = True
+                    beta = beta_new
+                    criterion_fulfilled = True
+                else:
+                    time_step *= gamma
+
+            counter += 1
+
+        if trace_progress:
+            print(f"Loop: {interval + 1} of {num_intervals} finished.")
+
+        # Store solution
+        solution[interval] = beta[index_permutation - 1]
+        iterations[interval] = counter - 1
+        lambdas[interval] = lambda_val
+
+    # Prepare results
+    if num_fixed_effects == 0:
+        return {
+            "random_effects": solution,
+            "lambda": lambdas,
+            "iterations": iterations,
+            "rel_acc": epsilon_convergence,
+            "max_iter": max_iterations,
+            "gamma_bls": gamma,
+            "xi": proportion_xi,
+            "loops_lambda": num_intervals,
+        }
+    else:
+        return {
+            "fixed_effects": solution[:, :num_fixed_effects],
+            "random_effects": solution[:, num_fixed_effects:],
+            "lambda": lambdas,
+            "iterations": iterations,
+            "rel_acc": epsilon_convergence,
+            "max_iter": max_iterations,
+            "gamma_bls": gamma,
+            "xi": proportion_xi,
+            "loops_lambda": num_intervals,
+        }
+
+
 class GroupLasso(BaseEstimator, RegressorMixin):
     r"""Group Lasso regression.
 
@@ -167,20 +341,8 @@ class GroupLasso(BaseEstimator, RegressorMixin):
         beta = np.zeros(n_features)
         index_permutation = np.arange(1, n_features + 1)
 
-        # Compute lambda_max if not provided
-        if self.lambda_max is None:
-            lambda_max = lambda_max_group_lasso(
-                y=y,
-                groups=groups,
-                feature_weights=feature_weights,
-                beta=beta.copy(),
-                X=X,
-            )
-        else:
-            lambda_max = self.lambda_max
-
         # Run group lasso algorithm
-        result = self._group_lasso(
+        result = group_lasso(
             y=y,
             X=X,
             feature_weights=feature_weights,
@@ -190,7 +352,7 @@ class GroupLasso(BaseEstimator, RegressorMixin):
             epsilon_convergence=self.tol,
             max_iterations=self.max_iter,
             gamma=self.gamma,
-            lambda_max=lambda_max,
+            lambda_max=self.lambda_max,
             proportion_xi=self.proportion_xi,
             num_intervals=self.num_intervals,
             num_fixed_effects=self.num_fixed_effects,
@@ -271,134 +433,3 @@ class GroupLasso(BaseEstimator, RegressorMixin):
             raise ValueError("num_fixed_effects must be non-negative")
         if self.lambda_max is not None and self.lambda_max <= 0:
             raise ValueError("lambda_max must be positive")
-
-    def _group_lasso(
-        self,
-        y: np.ndarray,
-        X: np.ndarray,
-        feature_weights: np.ndarray,
-        groups: np.ndarray,
-        beta: np.ndarray,
-        index_permutation: np.ndarray,
-        epsilon_convergence: float,
-        max_iterations: int,
-        gamma: float,
-        lambda_max: float,
-        proportion_xi: float,
-        num_intervals: int,
-        num_fixed_effects: int,
-        trace_progress: bool,
-    ) -> Dict[str, Any]:
-        """Core group lasso algorithm.
-
-        This is a private method that implements the group lasso algorithm.
-        See class docstring for the mathematical details.
-        """
-        n, p = X.shape
-
-        # Initialize variables
-        num_groups = np.max(groups)
-        index_start = np.zeros(num_groups, dtype=int)
-        index_end = np.zeros(num_groups, dtype=int)
-        group_sizes = np.zeros(num_groups, dtype=int)
-        group_weights = np.zeros(num_groups)
-
-        # Create vectors of group sizes, start indices, end indices, and group weights
-        for i in range(num_groups):
-            group_mask = groups == (i + 1)
-            group_sizes[i] = np.sum(group_mask)
-            index_start[i] = np.where(group_mask)[0][0]
-            index_end[i] = np.where(group_mask)[0][-1]
-            group_weights[i] = np.sqrt(np.sum(feature_weights[group_mask]))
-
-        # Calculate X.T * y
-        X_transp_y = X.T @ y
-
-        # Initialize result matrices
-        iterations = np.zeros(num_intervals, dtype=int)
-        lambdas = np.zeros(num_intervals)
-        solution = np.zeros((num_intervals, p))
-
-        for interval in range(num_intervals):
-            accuracy_reached = False
-            counter = 1
-            if num_intervals > 1:
-                lambda_val = lambda_max * np.exp(
-                    (interval / (num_intervals - 1)) * np.log(proportion_xi)
-                )
-            else:
-                lambda_val = lambda_max
-
-            while (not accuracy_reached) and (counter <= max_iterations):
-                # Calculate gradient
-                beta_col = beta.reshape(-1, 1)
-                gradient = (X.T @ (X @ beta_col).flatten() - X_transp_y) / n
-
-                criterion_fulfilled = False
-                time_step = 1.0
-
-                while not criterion_fulfilled:
-                    beta_new = np.zeros_like(beta)
-
-                    # Soft-scaling in groups
-                    for i in range(num_groups):
-                        start, end = index_start[i], index_end[i] + 1
-                        temp = beta[start:end] - time_step * gradient[start:end]
-                        l2_norm = np.linalg.norm(temp)
-                        threshold = time_step * lambda_val * group_weights[i]
-
-                        if l2_norm > threshold:
-                            scaling = 1.0 - threshold / l2_norm
-                            beta_new[start:end] = scaling * temp
-
-                    # Check convergence
-                    beta_diff = beta - beta_new
-                    loss_old = 0.5 * np.sum((y - X @ beta) ** 2) / n
-                    loss_new = 0.5 * np.sum((y - X @ beta_new) ** 2) / n
-
-                    if loss_new <= loss_old - np.dot(gradient, beta_diff) + (
-                        0.5 / time_step
-                    ) * np.sum(beta_diff**2):
-                        if np.max(
-                            np.abs(beta_diff)
-                        ) <= epsilon_convergence * np.linalg.norm(beta):
-                            accuracy_reached = True
-                        beta = beta_new
-                        criterion_fulfilled = True
-                    else:
-                        time_step *= gamma
-
-                counter += 1
-
-            if trace_progress:
-                print(f"Loop: {interval + 1} of {num_intervals} finished.")
-
-            # Store solution
-            solution[interval] = beta[index_permutation - 1]
-            iterations[interval] = counter - 1
-            lambdas[interval] = lambda_val
-
-        # Prepare results
-        if num_fixed_effects == 0:
-            return {
-                "random_effects": solution,
-                "lambda": lambdas,
-                "iterations": iterations,
-                "rel_acc": epsilon_convergence,
-                "max_iter": max_iterations,
-                "gamma_bls": gamma,
-                "xi": proportion_xi,
-                "loops_lambda": num_intervals,
-            }
-        else:
-            return {
-                "fixed_effects": solution[:, :num_fixed_effects],
-                "random_effects": solution[:, num_fixed_effects:],
-                "lambda": lambdas,
-                "iterations": iterations,
-                "rel_acc": epsilon_convergence,
-                "max_iter": max_iterations,
-                "gamma_bls": gamma,
-                "xi": proportion_xi,
-                "loops_lambda": num_intervals,
-            }

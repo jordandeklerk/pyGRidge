@@ -1,7 +1,7 @@
 """Compute the maximum lambda value for sparse group lasso regularization."""
 
 import numpy as np
-from .bisection import bisection
+from .bisection import BisectionSolver
 
 
 def lambda_max_sparse_group_lasso(
@@ -80,7 +80,7 @@ def lambda_max_sparse_group_lasso(
     - :math:`\mathbf{r}` is the residual vector,
     - and :math:`n` is the number of samples.
 
-    The `seagull_bisection` function is used to solve for :math:`\lambda_g` within specified borders.
+    The `BisectionSolver` class is used to solve for :math:`\lambda_g` within specified borders.
     """
 
     n, p = matrix_x.shape
@@ -123,6 +123,7 @@ def lambda_max_sparse_group_lasso(
         vector_x_transp_residual_active = matrix_x.T @ vector_y
 
     vector_max_groups = np.zeros(number_groups)
+    solver = BisectionSolver()
 
     # Scale and perform bisection
     for i in range(number_groups):
@@ -140,7 +141,7 @@ def lambda_max_sparse_group_lasso(
             left_border = 0
             right_border = np.max(vector_temp_absolute) / alpha
 
-            vector_max_groups[i] = bisection(
+            vector_max_groups[i] = solver.solve(
                 vector_group_sizes[i],
                 alpha,
                 left_border,
