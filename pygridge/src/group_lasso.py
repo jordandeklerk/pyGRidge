@@ -281,6 +281,21 @@ class GroupLasso(BaseEstimator, RegressorMixin):
         num_fixed_effects: int = 0,
         verbose: bool = False,
     ):
+        if tol <= 0:
+            raise ValueError("tol must be positive")
+        if max_iter <= 0:
+            raise ValueError("max_iter must be positive")
+        if not 0 < gamma < 1:
+            raise ValueError("gamma must be between 0 and 1")
+        if not 0 < proportion_xi <= 1:
+            raise ValueError("proportion_xi must be between 0 and 1")
+        if num_intervals <= 0:
+            raise ValueError("num_intervals must be positive")
+        if num_fixed_effects < 0:
+            raise ValueError("num_fixed_effects must be non-negative")
+        if lambda_max is not None and lambda_max <= 0:
+            raise ValueError("lambda_max must be positive")
+
         self.feature_weights = feature_weights
         self.groups = groups
         self.tol = tol
@@ -309,7 +324,6 @@ class GroupLasso(BaseEstimator, RegressorMixin):
         """
         # Input validation
         X, y = check_X_y(X, y, accept_sparse=False)
-        self._validate_params()
 
         n_samples, n_features = X.shape
 
@@ -410,26 +424,3 @@ class GroupLasso(BaseEstimator, RegressorMixin):
             )
 
         return X @ self.coef_
-
-    def _validate_params(self) -> None:
-        """Validate parameters.
-
-        Raises
-        ------
-        ValueError
-            If any parameter is invalid.
-        """
-        if self.tol <= 0:
-            raise ValueError("tol must be positive")
-        if self.max_iter <= 0:
-            raise ValueError("max_iter must be positive")
-        if not 0 < self.gamma < 1:
-            raise ValueError("gamma must be between 0 and 1")
-        if not 0 < self.proportion_xi <= 1:
-            raise ValueError("proportion_xi must be between 0 and 1")
-        if self.num_intervals <= 0:
-            raise ValueError("num_intervals must be positive")
-        if self.num_fixed_effects < 0:
-            raise ValueError("num_fixed_effects must be non-negative")
-        if self.lambda_max is not None and self.lambda_max <= 0:
-            raise ValueError("lambda_max must be positive")

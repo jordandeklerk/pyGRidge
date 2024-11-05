@@ -16,7 +16,7 @@ def seagull(
     Z=None,
     weights_u=None,
     groups=None,
-    alpha=0.9,
+    alpha=1.0,  # Changed default to 1.0 to avoid requiring groups by default
     rel_acc=0.0001,
     max_lambda=None,
     xi=0.01,
@@ -38,11 +38,11 @@ def seagull(
         Fixed effects design matrix.
     Z : array-like of shape (n_samples, n_features_random)
         Random effects design matrix.
-    weights_u : array-like of shape (n_features_random,), optional
+    weights_u : array-like of shape (n_features_random), optional
         Weights for the random effects. If None, all weights are set to 1.
-    groups : array-like of shape (n_features,), optional
-        Group labels for each feature. Required when 0 <= alpha < 1.
-    alpha : float, default=0.9
+    groups : array-like of shape (n_features), optional
+        Group labels for each feature. Required when alpha < 1.
+    alpha : float, default=1.0
         Mixing parameter between lasso and group lasso. alpha=1 is lasso, alpha=0 is group lasso.
     rel_acc : float, default=0.0001
         Relative accuracy for convergence criterion.
@@ -79,7 +79,6 @@ def seagull(
     Here, :math:`\beta` are the fixed effects, :math:`u` are the random effects,
     :math:`G` is the number of groups, and :math:`p_g` is the size of group :math:`g`.
     """
-
     # Helper function to check if input is numeric
     def is_numeric(arr):
         return isinstance(arr, (list, np.ndarray)) and np.issubdtype(
@@ -151,29 +150,28 @@ def seagull(
 
     # Check alpha
     if alpha is None:
-        warnings.warn("The parameter alpha is None. Reset to default value (=0.9).")
-        alpha = 0.9
+        warnings.warn("The parameter alpha is None. Reset to default value (=1.0).")
+        alpha = 1.0
     else:
         try:
             alpha = float(alpha)
         except (TypeError, ValueError):
             warnings.warn(
-                "The parameter alpha is non-numeric. Reset to default value (=0.9)."
+                "The parameter alpha is non-numeric. Reset to default value (=1.0)."
             )
-            alpha = 0.9
+            alpha = 1.0
         else:
             if not (0.0 <= alpha <= 1.0):
                 warnings.warn(
-                    "The parameter alpha is out of range. Reset to default value"
-                    " (=1.0)."
+                    "The parameter alpha is out of range. Reset to default value (=1.0)."
                 )
-                alpha = 1.0  # Changed from 0.9 to 1.0
+                alpha = 1.0
 
-    # Check groups only if 0 <= alpha < 1
-    if 0 <= alpha < 1.0:
+    # Check groups only if alpha < 1 (not when alpha = 1)
+    if alpha < 1.0:
         if groups is None:
             raise ValueError(
-                "Vector groups is missing. Please provide groups when 0 <= alpha < 1."
+                "Vector groups is missing. Please provide groups when alpha < 1."
             )
         if not is_numeric(groups):
             raise ValueError("Non-numeric values detected in vector groups.")
@@ -266,7 +264,7 @@ def seagull(
     # Initialize index_permutation as identity permutation
     index_permutation = np.arange(1, p + 1)
 
-    if 0 <= alpha < 1.0:
+    if alpha < 1.0:  # Changed from 0 <= alpha < 1.0
         # Assign all fixed effects to one group if not assigned
         if p1 > 0 and groups.size == p2:
             groups_temp = np.full(p1, groups.min() - 1, dtype=int)
@@ -404,6 +402,14 @@ def seagull(
             num_fixed_effects=p1,
             trace_progress=trace_progress,
         )
+        res["result"] = "lasso"
+        # Rename lambda to lambda_values for consistency
+        res["lambda_values"] = res.pop("lambda")
+        # Add beta key containing the coefficients
+        if "fixed_effects" in res and "random_effects" in res:
+            res["beta"] = np.concatenate([res["fixed_effects"][-1], res["random_effects"][-1]])
+        else:
+            res["beta"] = res["random_effects"][-1]
     elif alpha == 0.0:
         res = group_lasso(
             y=y,
@@ -421,6 +427,14 @@ def seagull(
             num_fixed_effects=p1,
             trace_progress=trace_progress,
         )
+        res["result"] = "group_lasso"
+        # Rename lambda to lambda_values for consistency
+        res["lambda_values"] = res.pop("lambda")
+        # Add beta key containing the coefficients
+        if "fixed_effects" in res and "random_effects" in res:
+            res["beta"] = np.concatenate([res["fixed_effects"][-1], res["random_effects"][-1]])
+        else:
+            res["beta"] = res["random_effects"][-1]
     else:
         res = sparse_group_lasso(
             y=y,
@@ -439,5 +453,13 @@ def seagull(
             num_fixed_effects=p1,
             trace_progress=trace_progress,
         )
+        res["result"] = "sparse_group_lasso"
+        # Rename lambda to lambda_values for consistency
+        res["lambda_values"] = res.pop("lambda")
+        # Add beta key containing the coefficients
+        if "fixed_effects" in res and "random_effects" in res:
+            res["beta"] = np.concatenate([res["fixed_effects"][-1], res["random_effects"][-1]])
+        else:
+            res["beta"] = res["random_effects"][-1]
 
     return res

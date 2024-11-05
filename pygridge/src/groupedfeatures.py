@@ -4,6 +4,7 @@ from typing import Callable, Union, TypeVar, List, Optional
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
+from sklearn.exceptions import NotFittedError
 
 T = TypeVar("T")
 
@@ -16,7 +17,7 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
 
     Parameters
     ----------
-    ps : list of int
+    ps : list or array-like of int
         List of positive integers representing the size of each group.
     group_operation : callable, default=None
         Optional function to apply to each group during transformation.
@@ -32,6 +33,8 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         Number of groups, denoted as :math:`G`.
     feature_groups_ : list of range
         List of range objects representing the indices for each group.
+    is_fitted_ : bool
+        Whether the transformer has been fitted.
 
     Raises
     ------
@@ -41,7 +44,16 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         If any group size is not positive.
     """
 
-    def __init__(self, ps: List[int], group_operation: Optional[Callable] = None):
+    def __init__(self, ps: Union[List[int], np.ndarray], group_operation: Optional[Callable] = None):
+        if isinstance(ps, np.ndarray):
+            ps = ps.tolist()
+        if not isinstance(ps, list):
+            raise TypeError(f"ps must be a list of positive integers, got {type(ps).__name__}")
+        if not all(isinstance(p, (int, np.integer)) for p in ps):
+            raise TypeError("All group sizes in ps must be integers")
+        if not all(p > 0 for p in ps):
+            raise ValueError("All group sizes in ps must be positive integers")
+        
         self.ps = ps
         self.group_operation = group_operation
 
@@ -92,7 +104,7 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         # Validate feature dimensions
         if X.shape[1] != self.n_features_in_:
             raise ValueError(
-                f"X has {X.shape[1]} features, but GroupedFeatures is expecting "
+                f"X has {X.shape[1]} features but GroupedFeatures is expecting "
                 f"{self.n_features_in_} features as per the ps parameter."
             )
 
@@ -100,6 +112,9 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         starts = np.cumsum([0] + self.ps_[:-1]).astype(int)
         ends = np.cumsum(self.ps_).astype(int)
         self.feature_groups_ = [range(start, end) for start, end in zip(starts, ends)]
+        
+        # Mark as fitted
+        self.is_fitted_ = True
 
         return self
 
@@ -122,7 +137,7 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
 
         if X.shape[1] != self.n_features_in_:
             raise ValueError(
-                f"X has {X.shape[1]} features, but GroupedFeatures is expecting "
+                f"X has {X.shape[1]} features but GroupedFeatures is expecting "
                 f"{self.n_features_in_} features as per the fit method."
             )
 
@@ -248,7 +263,17 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
                     f"Length of vec ({vec.shape[1]}) does not match number of "
                     f"features ({self.n_features_in_})"
                 )
-        elif not isinstance(vec, list) or len(vec) != self.n_features_in_:
+        elif isinstance(vec, list):
+            if len(vec) == self.n_features_in_:
+                vec = np.array(vec).reshape(1, -1)
+            else:
+                # Try to convert list of lists to 2D array
+                vec = np.array(vec)
+                if vec.shape[1] != self.n_features_in_:
+                    raise ValueError(
+                        f"vec must be array-like with {self.n_features_in_} features"
+                    )
+        else:
             raise ValueError(
                 f"vec must be array-like with {self.n_features_in_} features"
             )
@@ -256,11 +281,7 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         summaries = []
         for group_range in self.feature_groups_:
             try:
-                group_features = (
-                    [vec[j] for j in group_range]
-                    if isinstance(vec, list)
-                    else vec[:, group_range]
-                )
+                group_features = vec[:, group_range]
                 summaries.append(f(group_features))
             except Exception as e:
                 raise RuntimeError(

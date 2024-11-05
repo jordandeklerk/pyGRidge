@@ -1,7 +1,7 @@
 """Compute the maximum lambda value for group lasso regularization."""
 
 import numpy as np
-from sklearn.utils.validation import check_array, check_consistent_length
+from sklearn.utils.validation import check_array
 
 
 def lambda_max_group_lasso(y, groups, feature_weights, beta, X):
@@ -56,14 +56,25 @@ def lambda_max_group_lasso(y, groups, feature_weights, beta, X):
     feature_weights = check_array(feature_weights, ensure_2d=False)
     beta = check_array(beta, ensure_2d=False)
 
-    # Check consistent lengths
-    check_consistent_length(X, groups)
-    check_consistent_length(X, feature_weights)
-    check_consistent_length(X, beta)
-    n_samples = X.shape[0]
-    check_consistent_length(y, np.zeros(n_samples))
+    # Check dimensions
+    n_samples, n_features = X.shape
+    if groups.shape[0] != n_features:
+        raise ValueError(
+            f"Number of groups ({groups.shape[0]}) does not match number of features ({n_features})"
+        )
+    if feature_weights.shape[0] != n_features:
+        raise ValueError(
+            f"Length of feature_weights ({feature_weights.shape[0]}) does not match number of features ({n_features})"
+        )
+    if beta.shape[0] != n_features:
+        raise ValueError(
+            f"Length of beta ({beta.shape[0]}) does not match number of features ({n_features})"
+        )
+    if y.shape[0] != n_samples:
+        raise ValueError(
+            f"Length of y ({y.shape[0]}) does not match number of samples ({n_samples})"
+        )
 
-    n, p = X.shape
     num_groups = np.max(groups)
     lambda_max = 0.0
     num_zeros_weights = np.sum(feature_weights == 0.0)
@@ -105,7 +116,7 @@ def lambda_max_group_lasso(y, groups, feature_weights, beta, X):
         if group_weights[i] == 0.0:
             l2_norm_groups[i] = 0.0
         else:
-            temp = n * group_weights[i]
+            temp = n_samples * group_weights[i]
             group_slice = slice(index_start[i], index_end[i] + 1)
             l2_norm_groups[i] = (
                 np.linalg.norm(X_transp_residual_active[group_slice]) / temp
