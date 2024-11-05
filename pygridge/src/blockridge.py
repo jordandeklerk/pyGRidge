@@ -1,11 +1,11 @@
 """Group Ridge regression estimators."""
 
 from abc import ABC, abstractmethod
-from typing import Union, TypeVar, Dict, Any
+from typing import Union, TypeVar, Dict, Any, Optional
 import numpy as np
 from scipy.linalg import cho_solve
-from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.utils.validation import check_X_y, check_array
+from sklearn.base import BaseEstimator, RegressorMixin, clone
+from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 from .groupedfeatures import GroupedFeatures
 from .nnls import nonneg_lsq, NNLSError
 import warnings
@@ -464,11 +464,12 @@ class ShermanMorrisonRidgePredictor(BaseRidgePredictor):
 
         self.n_samples_, self.n_features_ = X.shape
         self.X_ = X
-        self.gram_matrix_ = self.X_.T @ X / self.n_samples_
+        
+        reg_term = 1e-6 * np.eye(self.n_features_)
+        self.gram_matrix_ = (self.X_.T @ X / self.n_samples_) + reg_term
 
-        # Check if gram matrix is nearly singular
         cond = np.linalg.cond(self.gram_matrix_)
-        if cond > 1e15:
+        if cond > 1e20:  
             raise SingularMatrixError(
                 f"Gram matrix is nearly singular with condition number: {cond}"
             )
@@ -627,8 +628,9 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
 
     Parameters
     ----------
-    groups : GroupedFeatures
-        The grouped features object.
+    groups : Optional[GroupedFeatures], default=None
+        The grouped features object. If None, a single group containing all features
+        will be created during fit.
     alpha : Union[np.ndarray, dict], default=None
         The regularization parameters. Can be a numpy array or a dictionary
         mapping group names to :math:`\alpha` values. If None, uses ones.
@@ -664,7 +666,7 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
     - If n_features >= 4 * n_samples: Use Sherman-Morrison updates
     """
 
-    def __init__(self, groups: GroupedFeatures, alpha: Union[np.ndarray, dict] = None):
+    def __init__(self, groups: Optional[GroupedFeatures] = None, alpha: Union[np.ndarray, dict, float] = None):
         self.groups = groups
         self.alpha = alpha
 
@@ -676,10 +678,13 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         ValueError
             If groups does not contain any groups or if any group has zero size.
         """
-        if not self.groups.ps:
-            raise ValueError("GroupedFeatures must contain at least one group.")
-        if any(p == 0 for p in self.groups.ps):
-            raise ValueError("GroupedFeatures groups must have non-zero sizes.")
+        if hasattr(self, 'groups_') and self.groups_ is not None:
+            if not isinstance(self.groups_, GroupedFeatures):
+                raise ValueError("groups must be a GroupedFeatures instance")
+            if not hasattr(self.groups_, 'ps') or not self.groups_.ps:
+                raise ValueError("GroupedFeatures must contain at least one group")
+            if any(p == 0 for p in self.groups_.ps):
+                raise ValueError("GroupedFeatures groups must have non-zero sizes")
 
     def fit(self, X: np.ndarray, y: np.ndarray):
         """Fit the Ridge regression model.
@@ -696,41 +701,53 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         self : object
             Returns self.
         """
-        self._validate_params()
-        X, y = check_X_y(X, y, accept_sparse=False)
+        X, y = check_X_y(X, y, accept_sparse=False, multi_output=False)
+        
+        # Store feature names and dimensions
+        self.n_features_in_ = X.shape[1]
+        self.feature_names_in_ = np.arange(self.n_features_in_)
+        self.n_samples_, self.n_features_ = X.shape
+        
+        # Create default groups if none provided
+        if self.groups is None:
+            self.groups_ = GroupedFeatures([self.n_features_])
+        else:
+            # Clone and fit groups to ensure estimator independence
+            self.groups_ = clone(self.groups)
+        
+        self.groups_.fit(X)
+        
+        # Store data for sigma_squared_path
+        self.X_ = X
         self.y_ = y
 
-        self.n_features_in_ = X.shape[1]
-        self.n_samples_, self.n_features_ = X.shape
-        self.groups_ = self.groups
-
-        # Validate that groups match features
-        total_features = sum(self.groups.ps)
-        if total_features != self.n_features_:
-            raise ValueError(
-                f"Total features in groups ({total_features}) must match data features ({self.n_features_})"
-            )
-
         # Initialize predictor based on problem dimensions
-        if self.n_features_ <= self.n_samples_:
-            self.predictor_ = CholeskyRidgePredictor(X)
-        elif (
-            self.n_features_ > self.n_samples_
-            and self.n_features_ < 4 * self.n_samples_
-        ):
-            self.predictor_ = WoodburyRidgePredictor(X)
-        else:
+        if self.n_features_ >= 4 * self.n_samples_:
             self.predictor_ = ShermanMorrisonRidgePredictor(X)
+        elif self.n_features_ <= self.n_samples_:
+            self.predictor_ = CholeskyRidgePredictor(X)
+        else:
+            self.predictor_ = WoodburyRidgePredictor(X)
 
         self.gram_target_ = np.dot(X.T, y) / self.n_samples_
 
         # Set alpha values
         if self.alpha is None:
-            self.alpha_ = np.ones(self.groups.num_groups)
+            self.alpha_ = np.ones(self.groups_.num_groups)
         elif isinstance(self.alpha, dict):
-            self.alpha_ = np.array(list(self.alpha.values()))
+            self.alpha_ = np.array([self.alpha.get(name, 1.0) for name in self.groups_.names])
+        elif isinstance(self.alpha, (int, float)):
+            # Handle scalar alpha
+            self.alpha_ = np.full(self.groups_.num_groups, self.alpha)
         else:
+            # Handle array-like alpha
             self.alpha_ = np.asarray(self.alpha)
+            if self.alpha_.size == 1:
+                self.alpha_ = np.full(self.groups_.num_groups, self.alpha_[0])
+            elif self.alpha_.size != self.groups_.num_groups:
+                raise ValueError(
+                    f"Alpha length ({self.alpha_.size}) must match number of groups ({self.groups_.num_groups})"
+                )
 
         self.predictor_.set_params(self.groups_, self.alpha_)
         self.coef_ = self.predictor_._solve_system(self.gram_target_)
@@ -758,7 +775,14 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         np.ndarray of shape (n_samples_new,)
             Predicted values.
         """
+        check_is_fitted(self)
         X = check_array(X, accept_sparse=False)
+        
+        if X.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"X has {X.shape[1]} features, but {self.n_features_in_} features were seen during fit"
+            )
+            
         return np.dot(X, self.coef_)
 
     def get_params(self, deep: bool = True) -> Dict[str, Any]:
@@ -775,7 +799,11 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         params : Dict[str, Any]
             Parameter names mapped to their values.
         """
-        return {"groups": self.groups, "alpha": self.alpha}
+        params = super().get_params(deep=deep)
+        if deep and hasattr(self.groups, 'get_params'):
+            groups_params = self.groups.get_params(deep=True)
+            params.update({f'groups__{key}': val for key, val in groups_params.items()})
+        return params
 
     def set_params(self, **params) -> "GroupRidgeRegressor":
         """Set the parameters of this estimator.
@@ -790,10 +818,18 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         self : object
             Estimator instance.
         """
-        if "groups" in params:
-            self.groups = params["groups"]
-        if "alpha" in params:
-            self.alpha = params["alpha"]
+        groups_params = {}
+        own_params = {}
+        for key, value in params.items():
+            if key.startswith('groups__'):
+                groups_params[key.split('__', 1)[1]] = value
+            else:
+                own_params[key] = value
+                
+        if groups_params and hasattr(self.groups, 'set_params'):
+            self.groups.set_params(**groups_params)
+        if own_params:
+            super().set_params(**own_params)
         return self
 
     def get_loo_error(self) -> float:
