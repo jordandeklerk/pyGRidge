@@ -79,6 +79,7 @@ def seagull(
     Here, :math:`\beta` are the fixed effects, :math:`u` are the random effects,
     :math:`G` is the number of groups, and :math:`p_g` is the size of group :math:`g`.
     """
+
     # Helper function to check if input is numeric
     def is_numeric(arr):
         return isinstance(arr, (list, np.ndarray)) and np.issubdtype(
@@ -407,7 +408,9 @@ def seagull(
         res["lambda_values"] = res.pop("lambda")
         # Add beta key containing the coefficients
         if "fixed_effects" in res and "random_effects" in res:
-            res["beta"] = np.concatenate([res["fixed_effects"][-1], res["random_effects"][-1]])
+            res["beta"] = np.concatenate(
+                [res["fixed_effects"][-1], res["random_effects"][-1]]
+            )
         else:
             res["beta"] = res["random_effects"][-1]
     elif alpha == 0.0:
@@ -432,7 +435,9 @@ def seagull(
         res["lambda_values"] = res.pop("lambda")
         # Add beta key containing the coefficients
         if "fixed_effects" in res and "random_effects" in res:
-            res["beta"] = np.concatenate([res["fixed_effects"][-1], res["random_effects"][-1]])
+            res["beta"] = np.concatenate(
+                [res["fixed_effects"][-1], res["random_effects"][-1]]
+            )
         else:
             res["beta"] = res["random_effects"][-1]
     else:
@@ -458,7 +463,9 @@ def seagull(
         res["lambda_values"] = res.pop("lambda")
         # Add beta key containing the coefficients
         if "fixed_effects" in res and "random_effects" in res:
-            res["beta"] = np.concatenate([res["fixed_effects"][-1], res["random_effects"][-1]])
+            res["beta"] = np.concatenate(
+                [res["fixed_effects"][-1], res["random_effects"][-1]]
+            )
         else:
             res["beta"] = res["random_effects"][-1]
 

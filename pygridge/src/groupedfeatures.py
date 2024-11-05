@@ -44,16 +44,22 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         If any group size is not positive.
     """
 
-    def __init__(self, ps: Union[List[int], np.ndarray], group_operation: Optional[Callable] = None):
+    def __init__(
+        self,
+        ps: Union[List[int], np.ndarray],
+        group_operation: Optional[Callable] = None,
+    ):
         if isinstance(ps, np.ndarray):
             ps = ps.tolist()
         if not isinstance(ps, list):
-            raise TypeError(f"ps must be a list of positive integers, got {type(ps).__name__}")
+            raise TypeError(
+                f"ps must be a list of positive integers, got {type(ps).__name__}"
+            )
         if not all(isinstance(p, (int, np.integer)) for p in ps):
             raise TypeError("All group sizes in ps must be integers")
         if not all(p > 0 for p in ps):
             raise ValueError("All group sizes in ps must be positive integers")
-        
+
         self.ps = ps
         self.group_operation = group_operation
 
@@ -112,7 +118,7 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         starts = np.cumsum([0] + self.ps_[:-1]).astype(int)
         ends = np.cumsum(self.ps_).astype(int)
         self.feature_groups_ = [range(start, end) for start, end in zip(starts, ends)]
-        
+
         # Mark as fitted
         self.is_fitted_ = True
 

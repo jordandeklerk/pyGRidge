@@ -28,10 +28,10 @@ def generate_test_matrix(n_samples, n_features, seed=42):
     # Create a matrix with controlled singular values
     U = np.random.randn(n_samples, min(n_samples, n_features))
     U, _ = np.linalg.qr(U)
-    
+
     V = np.random.randn(n_features, min(n_samples, n_features))
     V, _ = np.linalg.qr(V)
-    
+
     s = np.linspace(0.1, 1.0, min(n_samples, n_features))
     X = U @ np.diag(s) @ V.T
     X = X + 1e-4 * np.random.randn(n_samples, n_features)
@@ -67,6 +67,7 @@ def fitted_model(sample_data, sample_groups):
 
 class DynamicGroupedFeatures(GroupedFeatures):
     """A GroupedFeatures class that adapts to input data dimensions."""
+
     def fit(self, X):
         n_features = X.shape[1]
         # Create equal-sized groups based on number of features
@@ -86,7 +87,7 @@ def test_scikit_learn_compatibility():
     # Create a dummy model with dynamic groups that will adapt to any input
     groups = DynamicGroupedFeatures([1, 1])  # Initial groups don't matter
     model = GroupRidgeRegressor(groups=groups)
-    
+
     # Run the scikit-learn compatibility checks
     check_estimator(model)
 
@@ -149,11 +150,13 @@ class TestGroupRidgeRegressor:
         n_samples, n_features = 20, 100
         X_large = generate_test_matrix(n_samples, n_features)
         y_large = np.random.randn(n_samples)
-        
+
         large_groups = GroupedFeatures([50, 50])
         large_groups.fit(X_large)  # Fit groups with the data
         # Use stronger regularization
-        model_large = GroupRidgeRegressor(groups=large_groups, alpha=np.array([100.0, 100.0]))
+        model_large = GroupRidgeRegressor(
+            groups=large_groups, alpha=np.array([100.0, 100.0])
+        )
         model_large.fit(X_large, y_large)
         assert isinstance(model_large.predictor_, ShermanMorrisonRidgePredictor)
 

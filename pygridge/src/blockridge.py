@@ -464,12 +464,12 @@ class ShermanMorrisonRidgePredictor(BaseRidgePredictor):
 
         self.n_samples_, self.n_features_ = X.shape
         self.X_ = X
-        
+
         reg_term = 1e-6 * np.eye(self.n_features_)
         self.gram_matrix_ = (self.X_.T @ X / self.n_samples_) + reg_term
 
         cond = np.linalg.cond(self.gram_matrix_)
-        if cond > 1e20:  
+        if cond > 1e20:
             raise SingularMatrixError(
                 f"Gram matrix is nearly singular with condition number: {cond}"
             )
@@ -666,7 +666,11 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
     - If n_features >= 4 * n_samples: Use Sherman-Morrison updates
     """
 
-    def __init__(self, groups: Optional[GroupedFeatures] = None, alpha: Union[np.ndarray, dict, float] = None):
+    def __init__(
+        self,
+        groups: Optional[GroupedFeatures] = None,
+        alpha: Union[np.ndarray, dict, float] = None,
+    ):
         self.groups = groups
         self.alpha = alpha
 
@@ -678,10 +682,10 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         ValueError
             If groups does not contain any groups or if any group has zero size.
         """
-        if hasattr(self, 'groups_') and self.groups_ is not None:
+        if hasattr(self, "groups_") and self.groups_ is not None:
             if not isinstance(self.groups_, GroupedFeatures):
                 raise ValueError("groups must be a GroupedFeatures instance")
-            if not hasattr(self.groups_, 'ps') or not self.groups_.ps:
+            if not hasattr(self.groups_, "ps") or not self.groups_.ps:
                 raise ValueError("GroupedFeatures must contain at least one group")
             if any(p == 0 for p in self.groups_.ps):
                 raise ValueError("GroupedFeatures groups must have non-zero sizes")
@@ -702,26 +706,20 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
             Returns self.
         """
         X, y = check_X_y(X, y, accept_sparse=False, multi_output=False)
-        
-        # Store feature names and dimensions
+
         self.n_features_in_ = X.shape[1]
         self.feature_names_in_ = np.arange(self.n_features_in_)
         self.n_samples_, self.n_features_ = X.shape
-        
-        # Create default groups if none provided
+
         if self.groups is None:
             self.groups_ = GroupedFeatures([self.n_features_])
         else:
-            # Clone and fit groups to ensure estimator independence
             self.groups_ = clone(self.groups)
-        
+
         self.groups_.fit(X)
-        
-        # Store data for sigma_squared_path
         self.X_ = X
         self.y_ = y
 
-        # Initialize predictor based on problem dimensions
         if self.n_features_ >= 4 * self.n_samples_:
             self.predictor_ = ShermanMorrisonRidgePredictor(X)
         elif self.n_features_ <= self.n_samples_:
@@ -731,16 +729,15 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
 
         self.gram_target_ = np.dot(X.T, y) / self.n_samples_
 
-        # Set alpha values
         if self.alpha is None:
             self.alpha_ = np.ones(self.groups_.num_groups)
         elif isinstance(self.alpha, dict):
-            self.alpha_ = np.array([self.alpha.get(name, 1.0) for name in self.groups_.names])
+            self.alpha_ = np.array(
+                [self.alpha.get(name, 1.0) for name in self.groups_.names]
+            )
         elif isinstance(self.alpha, (int, float)):
-            # Handle scalar alpha
             self.alpha_ = np.full(self.groups_.num_groups, self.alpha)
         else:
-            # Handle array-like alpha
             self.alpha_ = np.asarray(self.alpha)
             if self.alpha_.size == 1:
                 self.alpha_ = np.full(self.groups_.num_groups, self.alpha_[0])
@@ -753,10 +750,8 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         self.coef_ = self.predictor_._solve_system(self.gram_target_)
         self.y_pred_ = np.dot(X, self.coef_)
 
-        # Store gram_reg_inv_ for MomentTunerSetup
         self.gram_reg_inv_ = self.predictor_._solve_system(np.eye(self.n_features_))
 
-        # Compute leverage scores
         self.gram_reg_inv_X_ = self.predictor_._solve_system(X.T).T / self.n_samples_
         self.leverage_ = np.sum(X * self.gram_reg_inv_X_, axis=1)
 
@@ -777,12 +772,12 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         """
         check_is_fitted(self)
         X = check_array(X, accept_sparse=False)
-        
+
         if X.shape[1] != self.n_features_in_:
             raise ValueError(
                 f"X has {X.shape[1]} features, but {self.n_features_in_} features were seen during fit"
             )
-            
+
         return np.dot(X, self.coef_)
 
     def get_params(self, deep: bool = True) -> Dict[str, Any]:
@@ -800,9 +795,9 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
             Parameter names mapped to their values.
         """
         params = super().get_params(deep=deep)
-        if deep and hasattr(self.groups, 'get_params'):
+        if deep and hasattr(self.groups, "get_params"):
             groups_params = self.groups.get_params(deep=True)
-            params.update({f'groups__{key}': val for key, val in groups_params.items()})
+            params.update({f"groups__{key}": val for key, val in groups_params.items()})
         return params
 
     def set_params(self, **params) -> "GroupRidgeRegressor":
@@ -821,12 +816,12 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
         groups_params = {}
         own_params = {}
         for key, value in params.items():
-            if key.startswith('groups__'):
-                groups_params[key.split('__', 1)[1]] = value
+            if key.startswith("groups__"):
+                groups_params[key.split("__", 1)[1]] = value
             else:
                 own_params[key] = value
-                
-        if groups_params and hasattr(self.groups, 'set_params'):
+
+        if groups_params and hasattr(self.groups, "set_params"):
             self.groups.set_params(**groups_params)
         if own_params:
             super().set_params(**own_params)
@@ -948,14 +943,12 @@ class MomentTunerSetup:
         self.n_features_per_group_ = np.array(estimator.groups_.ps)
         self.n_samples_ = estimator.n_samples_
 
-        # Compute coefficient norms per group
         self.coef_norms_squared_ = np.array(
             estimator.groups_.group_summary(
                 estimator.coef_, lambda x: np.sum(np.abs(x) ** 2)
             )
         )
 
-        # Validate and compute gram matrix inverse norms
         gram_inv_matrix = estimator.gram_reg_inv_
         total_features = self.n_features_per_group_.sum()
         if gram_inv_matrix.shape[1] != total_features:
@@ -970,7 +963,6 @@ class MomentTunerSetup:
             )
         )
 
-        # Compute moment matrix
         self.moment_matrix_ = (
             np.outer(self.n_features_per_group_, self.n_features_per_group_)
             / self.n_samples_**2
@@ -1052,18 +1044,15 @@ def sigma_squared_path(
     n_groups = len(moment_tuner.n_features_per_group_)
     n_features = moment_tuner.n_features_per_group_.sum()
 
-    # Initialize result arrays
     alphas = np.zeros((n_values, n_groups))
     errors = np.zeros(n_values)
     coefs = np.zeros((n_values, n_features))
 
     for i, sigma_sq in enumerate(sigma_squared_values):
         try:
-            # Compute optimal regularization parameters
             alpha_values = get_lambdas(moment_tuner, sigma_sq)
             alphas[i] = alpha_values
 
-            # Fit model and store results
             estimator.set_params(alpha=alpha_values)
             estimator.fit(estimator.X_, estimator.y_)
             errors[i] = estimator.get_loo_error()
@@ -1185,7 +1174,6 @@ def get_alpha_s_squared(
     if np.any(moment_tuner.n_features_per_group_ <= 0):
         raise ValueError("All group sizes must be positive")
 
-    # Compute right-hand side of the system
     rhs = (
         moment_tuner.coef_norms_squared_
         - sigma_squared * moment_tuner.gram_inv_norms_squared_
@@ -1198,7 +1186,6 @@ def get_alpha_s_squared(
     except NNLSError as e:
         raise NNLSError(f"Non-negative least squares optimization failed: {str(e)}")
 
-    # Scale by group sizes
     alpha_squared = alpha_per_group * moment_tuner.n_features_per_group_
 
     return alpha_squared
