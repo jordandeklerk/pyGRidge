@@ -171,10 +171,8 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
             The initialized grouped features object.
         """
         if self.feature_groups is None:
-            # Each feature is its own group
             return GroupedFeatures([1] * n_features)
         else:
-            # Validate and convert feature groups
             all_features = set()
             group_sizes = []
             for group in self.feature_groups:
@@ -182,7 +180,9 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
                     raise ValueError("Each group must be a list of feature indices")
                 if not group:
                     raise ValueError("Empty groups are not allowed")
-                if not all(isinstance(idx, int) and 0 <= idx < n_features for idx in group):
+                if not all(
+                    isinstance(idx, int) and 0 <= idx < n_features for idx in group
+                ):
                     raise ValueError(
                         f"Invalid feature indices in group {group}. Must be integers in [0, {n_features-1}]"
                     )
@@ -211,7 +211,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         float
             The optimal σ value.
         """
-        # Initialize ridge estimator if not already done
         if not hasattr(self, "ridge_estimator_"):
             self.ridge_estimator_ = GroupRidgeRegressor(
                 groups=self.feature_groups_,
@@ -219,7 +218,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
             )
             self.ridge_estimator_.fit(X, y)
 
-        # Initialize moment tuner
         moment_tuner = MomentTunerSetup(self.ridge_estimator_)
 
         # Define sigma squared values to evaluate
@@ -243,7 +241,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
                 num=10,
             )
 
-        # Compute regularization path
         path_results = sigma_squared_path(
             self.ridge_estimator_,
             moment_tuner,
@@ -252,11 +249,9 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
             tol=self.tol,
         )
 
-        # Find optimal sigma
         best_idx = np.argmin(path_results["errors"])
         sigma_opt = np.sqrt(sigma_squared_values[best_idx])
 
-        # Store optimal lambda values
         self.lambda_ = path_results["alphas"][best_idx]
         self.coef_ = path_results["coefs"][best_idx]
 
@@ -277,19 +272,14 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         self : object
             Returns self.
         """
-        # Input validation
         X, y = check_X_y(X, y, accept_sparse=False)
         self._validate_params()
 
-        # Store dimensions
         n_samples, n_features = X.shape
         self.n_features_in_ = n_features
         self.feature_names_in_ = np.arange(n_features)
-
-        # Initialize feature groups
         self.feature_groups_ = self._init_feature_groups(n_features)
 
-        # Center and scale if requested
         if self.center or self.scale:
             X = X.copy()
             if self.center:
@@ -300,20 +290,16 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
                 self.X_scale_[self.X_scale_ == 0] = 1
                 X /= self.X_scale_
 
-        # Store data
         self.X_ = X
         self.y_ = y
 
-        # Optimize sigma
         self.sigma_opt_ = self._optimize_sigma(X, y)
 
-        # Final fit with optimal parameters
         self.ridge_estimator_.set_params(alpha=self.lambda_)
         self.ridge_estimator_.fit(X, y)
 
-        # Store results
         self.coef_ = self.ridge_estimator_.coef_
-        self.intercept_ = 0.0  # Ridge regression typically doesn't use intercept
+        self.intercept_ = 0.0  #
 
         return self
 

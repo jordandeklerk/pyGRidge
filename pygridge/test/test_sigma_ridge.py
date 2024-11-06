@@ -63,7 +63,7 @@ def test_sigma_ridge_preprocessing():
     # Compare with sklearn's StandardScaler
     scaler = StandardScaler(with_mean=True, with_std=True)
     X_scaled = scaler.fit_transform(X)
-    
+
     # Check preprocessing attributes
     assert hasattr(reg_both, "X_mean_")
     assert hasattr(reg_both, "X_scale_")
@@ -111,7 +111,7 @@ def test_sigma_ridge_optimization_methods():
     X_test = rng.randn(5, n_features)
     pred_grid = reg_grid.predict(X_test)
     pred_bounded = reg_bounded.predict(X_test)
-    
+
     # Predictions should be similar (not exactly equal)
     assert np.corrcoef(pred_grid, pred_bounded)[0, 1] > 0.5
 
@@ -154,7 +154,7 @@ def test_sigma_ridge_moment_tuning():
     # Check that moment tuner was used
     assert hasattr(reg, "ridge_estimator_")
     moment_tuner = MomentTunerSetup(reg.ridge_estimator_)
-    
+
     # Verify moment tuner attributes
     assert hasattr(moment_tuner, "groups_")
     assert hasattr(moment_tuner, "n_features_per_group_")
