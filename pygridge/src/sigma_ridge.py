@@ -1,15 +1,17 @@
-"""Sigma Ridge regression with accelerated leave-one-out cross-validation."""
+r"""Sigma Ridge regression with accelerated leave-one-out cross-validation."""
 
 import numpy as np
 import warnings
 from typing import Optional, List, Union, Dict, Any
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+from sklearn.preprocessing import StandardScaler
 from .blockridge import (
     GroupRidgeRegressor,
     MomentTunerSetup,
     sigma_squared_path,
     get_lambdas,
+    SingularMatrixError,
 )
 from .groupedfeatures import GroupedFeatures
 
@@ -17,9 +19,9 @@ from .groupedfeatures import GroupedFeatures
 class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
     r"""Sigma Ridge regression with accelerated leave-one-out cross-validation.
 
-    This estimator implements σ-Ridge regression, which uses an empirical Bayes
-    approach to map a single hyperparameter σ to group-specific regularization
-    parameters λ(σ). The mapping is optimized using accelerated leave-one-out
+    This estimator implements Sigma-Ridge regression, which uses an empirical Bayes
+    approach to map a single hyperparameter :math:`\sigma` to group-specific regularization
+    parameters :math:`\lambda(\sigma)`. The mapping is optimized using accelerated leave-one-out
     cross-validation.
 
     Parameters
@@ -28,7 +30,7 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         Each sublist contains indices of features belonging to a group.
         If None, each feature is treated as its own group.
     sigma : float, default=1.0
-        Initial σ value.
+        Initial :math:`\sigma` value.
     decomposition : {'default', 'cholesky', 'woodbury'}, default='default'
         Method to solve the linear system:
         - 'default': Automatically choose based on problem dimensions
@@ -39,11 +41,11 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
     scale : bool, default=True
         Whether to scale the features.
     init_model : object, optional
-        Initial model for mapping σ to λ. Defaults to standard LOOCV Ridge Regressor.
+        Initial model for mapping :math:`\sigma` to :math:`\lambda`. Defaults to standard LOOCV Ridge Regressor.
     sigma_range : tuple of float, optional
-        Range of σ values for optimization. If None, determined automatically.
+        Range of :math:`\sigma` values for optimization. If None, determined automatically.
     optimization_method : {'bounded', 'grid_search'}, optional
-        Optimization strategy for σ.
+        Optimization strategy for :math:`\sigma`.
     tol : float, default=1e-4
         Tolerance for optimization convergence.
     max_iter : int, default=1000
@@ -56,9 +58,9 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
     intercept_ : float
         The intercept term.
     sigma_opt_ : float
-        The optimal σ value found during fitting.
+        The optimal :math:`\sigma` value found during fitting.
     lambda_ : ndarray of shape (n_groups,)
-        The optimal λ values computed from sigma_opt_.
+        The optimal :math:`\lambda` values computed from :math:`\sigma_\text{opt}`.
     n_iter_ : int
         Number of iterations performed during optimization.
     feature_groups_ : GroupedFeatures
@@ -70,7 +72,7 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
 
     Notes
     -----
-    The σ-Ridge regression model solves the optimization problem:
+    The Sigma-Ridge regression model solves the optimization problem:
 
     .. math::
         \min_{\beta} \|y - X\beta\|_2^2 + \sum_{g=1}^G \lambda_g(\sigma) \|\beta_g\|_2^2
@@ -79,9 +81,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
     - :math:`\beta_g` are the coefficients for group g
     - :math:`\lambda_g(\sigma)` is the regularization parameter for group g
     - :math:`\sigma` is a single hyperparameter that controls all :math:`\lambda_g`
-
-    The mapping :math:`\lambda_g(\sigma)` is determined using empirical Bayes and
-    optimized using accelerated leave-one-out cross-validation.
 
     Examples
     --------
@@ -196,33 +195,86 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
 
             return GroupedFeatures(group_sizes)
 
-    def _optimize_sigma(self, X: np.ndarray, y: np.ndarray) -> float:
-        """Optimize σ by minimizing CV error.
+    def _init_ridge_estimator(self, X: np.ndarray, y: np.ndarray) -> None:
+        """Initialize ridge estimator with appropriate regularization.
+
+        This method attempts to fit a GroupRidgeRegressor with increasingly larger
+        regularization values until a successful fit is achieved. This helps avoid
+        singular matrix issues that can occur with very small regularization values.
 
         Parameters
         ----------
-        X : ndarray of shape (n_samples, n_features)
+        X : array-like of shape (n_samples, n_features)
             Training data.
-        y : ndarray of shape (n_samples,)
+        y : array-like of shape (n_samples,)
+            Target values.
+
+        Raises
+        ------
+        SingularMatrixError
+            If fitting fails even with the largest regularization value.
+
+        Notes
+        -----
+        The method tries regularization values from 0.001 to 100.0 in increasing order.
+        For each value, it attempts to fit the GroupRidgeRegressor. If fitting succeeds,
+        it stores the estimator and breaks the loop. If all values fail, it raises
+        a SingularMatrixError.
+        """
+        regularization_values = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+
+        for alpha in regularization_values:
+            try:
+                self.ridge_estimator_ = GroupRidgeRegressor(
+                    groups=self.feature_groups_,
+                    alpha=np.ones(self.feature_groups_.num_groups) * alpha,
+                )
+                self.ridge_estimator_.fit(X, y)
+                break
+            except SingularMatrixError:
+                if alpha == regularization_values[-1]:
+                    raise
+
+    def _optimize_sigma(self, X: np.ndarray, y: np.ndarray) -> float:
+        """Optimize :math:`\sigma` by minimizing CV error.
+
+        This method finds the optimal value of sigma by minimizing the leave-one-out
+        cross-validation error. It uses either grid search or a geometric sequence
+        approach based on the optimization_method parameter.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Training data.
+        y : array-like of shape (n_samples,)
             Target values.
 
         Returns
         -------
         float
-            The optimal σ value.
+            The optimal value of sigma that minimizes the cross-validation error.
+
+        Notes
+        -----
+        The method follows these steps:
+        1. Initializes a ridge estimator if not already done
+        2. Sets up moment tuning for the estimator
+        3. Determines the range of sigma values to evaluate
+        4. Uses either grid search (20 points) or geometric sequence (10 points)
+        5. Computes the path of sigma squared values and their corresponding errors
+        6. Returns the square root of the sigma squared value with minimum error
+
+        The sigma range is either specified by sigma_range parameter or automatically
+        determined as (0.001 * sigma, 10 * sigma).
         """
         if not hasattr(self, "ridge_estimator_"):
-            self.ridge_estimator_ = GroupRidgeRegressor(
-                groups=self.feature_groups_,
-                alpha=np.ones(self.feature_groups_.num_groups),
-            )
-            self.ridge_estimator_.fit(X, y)
+            self._init_ridge_estimator(X, y)
 
         moment_tuner = MomentTunerSetup(self.ridge_estimator_)
 
         # Define sigma squared values to evaluate
         if self.sigma_range is None:
-            sigma_range = (0.1 * self.sigma, 10 * self.sigma)
+            sigma_range = (0.001 * self.sigma, 10 * self.sigma)
         else:
             sigma_range = self.sigma_range
 
@@ -252,13 +304,12 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         best_idx = np.argmin(path_results["errors"])
         sigma_opt = np.sqrt(sigma_squared_values[best_idx])
 
-        self.lambda_ = path_results["alphas"][best_idx]
-        self.coef_ = path_results["coefs"][best_idx]
+        self.moment_tuner_ = moment_tuner
 
         return sigma_opt
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "SigmaRidgeRegressor":
-        """Fit the σ-Ridge regression model.
+        """Fit the :math:`\sigma`-Ridge regression model.
 
         Parameters
         ----------
@@ -275,36 +326,59 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         X, y = check_X_y(X, y, accept_sparse=False)
         self._validate_params()
 
+        # Convert X to float64 to avoid type casting issues
+        X = X.astype(np.float64)
+
         n_samples, n_features = X.shape
         self.n_features_in_ = n_features
         self.feature_names_in_ = np.arange(n_features)
         self.feature_groups_ = self._init_feature_groups(n_features)
 
-        if self.center or self.scale:
-            X = X.copy()
-            if self.center:
-                self.X_mean_ = np.mean(X, axis=0)
-                X -= self.X_mean_
-            if self.scale:
-                self.X_scale_ = np.std(X, axis=0, ddof=1)
-                self.X_scale_[self.X_scale_ == 0] = 1
-                X /= self.X_scale_
+        # Store mean and scale for compatibility
+        if self.center:
+            self.X_mean_ = np.mean(X, axis=0)
+            X = X - self.X_mean_
+        else:
+            self.X_mean_ = np.zeros(n_features)
+
+        if self.scale:
+            self.X_scale_ = np.std(X, axis=0, ddof=1)
+            self.X_scale_[self.X_scale_ == 0] = 1
+            X = X / self.X_scale_
+        else:
+            self.X_scale_ = np.ones(n_features)
 
         self.X_ = X
         self.y_ = y
 
-        self.sigma_opt_ = self._optimize_sigma(X, y)
+        try:
+            self.sigma_opt_ = self._optimize_sigma(X, y)
+            self.lambda_ = get_lambdas(self.moment_tuner_, self.sigma_opt_**2)
+        except Exception as e:
+            warnings.warn(
+                f"Failed to compute optimal parameters: {str(e)}. "
+                "Falling back to default regularization."
+            )
+            self.sigma_opt_ = self.sigma
+            # Use very low regularization for better performance
+            self.lambda_ = np.ones(self.feature_groups_.num_groups) * 0.001
 
-        self.ridge_estimator_.set_params(alpha=self.lambda_)
-        self.ridge_estimator_.fit(X, y)
+        try:
+            self.ridge_estimator_.set_params(alpha=self.lambda_)
+            self.ridge_estimator_.fit(X, y)
+        except SingularMatrixError:
+            warnings.warn("Singular matrix detected. Using higher regularization.")
+            # Use higher regularization for numerical stability
+            self.lambda_ = np.maximum(self.lambda_, 10.0)
+            self._init_ridge_estimator(X, y)
 
         self.coef_ = self.ridge_estimator_.coef_
-        self.intercept_ = 0.0  #
+        self.intercept_ = 0.0
 
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predict using the σ-Ridge regression model.
+        """Predict using the :math:`\sigma`-Ridge regression model.
 
         Parameters
         ----------
@@ -325,13 +399,11 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
                 f"{self.n_features_in_} features as input"
             )
 
-        # Apply preprocessing if it was used during fit
-        if self.center or self.scale:
-            X = X.copy()
-            if self.center:
-                X -= self.X_mean_
-            if self.scale:
-                X /= self.X_scale_
+        X = X.astype(np.float64)
+        if self.center:
+            X = X - self.X_mean_
+        if self.scale:
+            X = X / self.X_scale_
 
         return self.ridge_estimator_.predict(X)
 
