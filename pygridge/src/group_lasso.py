@@ -83,7 +83,6 @@ def group_lasso(
     group_sizes = np.zeros(num_groups, dtype=int)
     group_weights = np.zeros(num_groups)
 
-    # Create vectors of group sizes, start indices, end indices, and group weights
     for i in range(num_groups):
         group_mask = groups == (i + 1)
         group_sizes[i] = np.sum(group_mask)
@@ -91,15 +90,12 @@ def group_lasso(
         index_end[i] = np.where(group_mask)[0][-1]
         group_weights[i] = np.sqrt(np.sum(feature_weights[group_mask]))
 
-    # Calculate X.T * y
     X_transp_y = X.T @ y
 
-    # Initialize result matrices
     iterations = np.zeros(num_intervals, dtype=int)
     lambdas = np.zeros(num_intervals)
     solution = np.zeros((num_intervals, p))
 
-    # Compute lambda_max if not provided
     if lambda_max is None:
         lambda_max = lambda_max_group_lasso(
             y=y,
@@ -120,7 +116,6 @@ def group_lasso(
             lambda_val = lambda_max
 
         while (not accuracy_reached) and (counter <= max_iterations):
-            # Calculate gradient
             beta_col = beta.reshape(-1, 1)
             gradient = (X.T @ (X @ beta_col).flatten() - X_transp_y) / n
 
@@ -141,7 +136,6 @@ def group_lasso(
                         scaling = 1.0 - threshold / l2_norm
                         beta_new[start:end] = scaling * temp
 
-                # Check convergence
                 beta_diff = beta - beta_new
                 loss_old = 0.5 * np.sum((y - X @ beta) ** 2) / n
                 loss_new = 0.5 * np.sum((y - X @ beta_new) ** 2) / n
@@ -163,12 +157,10 @@ def group_lasso(
         if trace_progress:
             print(f"Loop: {interval + 1} of {num_intervals} finished.")
 
-        # Store solution
         solution[interval] = beta[index_permutation - 1]
         iterations[interval] = counter - 1
         lambdas[interval] = lambda_val
 
-    # Prepare results
     if num_fixed_effects == 0:
         return {
             "random_effects": solution,
@@ -322,12 +314,10 @@ class GroupLasso(BaseEstimator, RegressorMixin):
         self : object
             Returns self.
         """
-        # Input validation
         X, y = check_X_y(X, y, accept_sparse=False)
 
         n_samples, n_features = X.shape
 
-        # Initialize or validate feature weights
         if self.feature_weights is None:
             feature_weights = np.ones(n_features)
         else:
@@ -340,9 +330,8 @@ class GroupLasso(BaseEstimator, RegressorMixin):
                     f" features, expected {n_features}"
                 )
 
-        # Initialize or validate groups
         if self.groups is None:
-            groups = np.arange(1, n_features + 1)  # Each feature is its own group
+            groups = np.arange(1, n_features + 1)  
         else:
             groups = check_array(self.groups.reshape(1, -1), ensure_2d=True).ravel()
             if len(groups) != n_features:
@@ -351,11 +340,9 @@ class GroupLasso(BaseEstimator, RegressorMixin):
                     f" {n_features}"
                 )
 
-        # Initialize beta
         beta = np.zeros(n_features)
         index_permutation = np.arange(1, n_features + 1)
 
-        # Run group lasso algorithm
         result = group_lasso(
             y=y,
             X=X,
@@ -373,9 +360,8 @@ class GroupLasso(BaseEstimator, RegressorMixin):
             trace_progress=self.verbose,
         )
 
-        # Store results
         if self.num_fixed_effects == 0:
-            self.coef_ = result["random_effects"][-1]  # Use last solution
+            self.coef_ = result["random_effects"][-1] 
             self.coef_path_ = result["random_effects"]
         else:
             fixed_effects = result["fixed_effects"][-1]
@@ -387,8 +373,6 @@ class GroupLasso(BaseEstimator, RegressorMixin):
 
         self.lambda_path_ = result["lambda"]
         self.n_iter_ = result["iterations"][-1]
-
-        # Store feature names and number of features
         self.n_features_in_ = n_features
         self.feature_names_in_ = np.arange(n_features)
 

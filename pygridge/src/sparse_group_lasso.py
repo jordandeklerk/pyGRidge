@@ -138,14 +138,11 @@ def sparse_group_lasso(
 
     n, p = X.shape
     num_groups = np.max(groups)
-
-    # Initialize variables
     index_start = np.zeros(num_groups, dtype=int)
     index_end = np.zeros(num_groups, dtype=int)
     group_sizes = np.zeros(num_groups, dtype=int)
     group_weights = np.zeros(num_groups)
 
-    # Create vectors of group sizes, start indices, end indices, and group weights
     for i in range(num_groups):
         group_mask = groups == (i + 1)
         group_sizes[i] = np.sum(group_mask)
@@ -153,10 +150,7 @@ def sparse_group_lasso(
         index_end[i] = np.where(group_mask)[0][-1]
         group_weights[i] = np.sqrt(np.sum(feature_weights[group_mask]))
 
-    # Calculate X.T * y
     X_transp_y = X.T @ y
-
-    # Initialize result arrays
     iterations = np.zeros(num_intervals, dtype=int)
     lambdas = np.zeros(num_intervals)
     solution = np.zeros((num_intervals, p))
@@ -172,7 +166,6 @@ def sparse_group_lasso(
             lambda_val = lambda_max
 
         while (not accuracy_reached) and (counter <= max_iterations):
-            # Calculate gradient
             beta_col = beta.reshape(-1, 1)
             gradient = (X.T @ (X @ beta_col).flatten() - X_transp_y) / n
 
@@ -182,7 +175,6 @@ def sparse_group_lasso(
             while not criterion_fulfilled:
                 beta_new = np.zeros_like(beta)
 
-                # Soft-thresholding and soft-scaling in groups
                 for i in range(num_groups):
                     start, end = index_start[i], index_end[i] + 1
                     temp = beta[start:end] - time_step * gradient[start:end]
@@ -203,7 +195,6 @@ def sparse_group_lasso(
                     else:
                         beta_new[start:end] = 0
 
-                # Check convergence
                 beta_diff = beta - beta_new
                 loss_old = 0.5 * np.sum((y - X @ beta) ** 2) / n
                 loss_new = 0.5 * np.sum((y - X @ beta_new) ** 2) / n
@@ -211,7 +202,6 @@ def sparse_group_lasso(
                 if loss_new <= loss_old - np.dot(gradient, beta_diff) + (
                     0.5 / time_step
                 ) * np.sum(beta_diff**2):
-                    # Adjust convergence criteria based on lambda value
                     conv_threshold = max(epsilon_convergence, lambda_val * 1e-4)
                     if np.max(np.abs(beta_diff)) <= conv_threshold * np.linalg.norm(
                         beta
@@ -227,12 +217,10 @@ def sparse_group_lasso(
         if trace_progress:
             print(f"Loop: {interval + 1} of {num_intervals} finished.")
 
-        # Store solution
         solution[interval] = beta[index_permutation - 1]
         iterations[interval] = counter - 1
         lambdas[interval] = lambda_val
 
-    # Prepare results
     if num_fixed_effects == 0:
         return {
             "random_effects": solution,

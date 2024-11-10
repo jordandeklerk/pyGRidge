@@ -123,11 +123,8 @@ def lasso(
     """
 
     n, p = X.shape
-
-    # Calculate X.T * y
     X_transp_y = X.T @ y
 
-    # Initialize result arrays
     iterations = np.zeros(num_intervals, dtype=int)
     lambdas = np.zeros(num_intervals)
     solution = np.zeros((num_intervals, p))
@@ -142,14 +139,12 @@ def lasso(
         else:
             lambda_val = lambda_max
 
-        # Special case for lambda = 0 (or very close to 0)
         if np.isclose(lambda_val, 0, atol=1e-10):
             beta = np.linalg.lstsq(X, y, rcond=None)[0]
             accuracy_reached = True
             counter = 1
         else:
             while (not accuracy_reached) and (counter < max_iterations):
-                # Calculate gradient
                 beta_col = beta.reshape(-1, 1)
                 gradient = (X.T @ (X @ beta_col).flatten() - X_transp_y) / n
 
@@ -157,14 +152,11 @@ def lasso(
                 time_step = 1.0
 
                 while not criterion_fulfilled:
-                    # Preparation for soft-thresholding
                     temp1 = beta - time_step * gradient
                     temp2 = lambda_val * time_step * feature_weights
 
-                    # Soft-thresholding to obtain beta_new
                     beta_new = np.sign(temp1) * np.maximum(np.abs(temp1) - temp2, 0)
 
-                    # Check convergence
                     beta_diff = beta - beta_new
                     loss_old = 0.5 * np.sum((y - X @ beta) ** 2) / n
                     loss_new = 0.5 * np.sum((y - X @ beta_new) ** 2) / n
@@ -172,7 +164,6 @@ def lasso(
                     if loss_new <= loss_old - np.dot(gradient, beta_diff) + (
                         0.5 / time_step
                     ) * np.sum(beta_diff**2):
-                        # Adjust convergence criteria based on lambda value
                         conv_threshold = max(epsilon_convergence, lambda_val * 1e-4)
                         if np.max(np.abs(beta_diff)) <= conv_threshold * np.linalg.norm(
                             beta
@@ -188,12 +179,10 @@ def lasso(
         if trace_progress:
             print(f"Loop: {interval + 1} of {num_intervals} finished.")
 
-        # Store solution
         solution[interval] = beta
         iterations[interval] = counter
         lambdas[interval] = lambda_val
 
-    # Prepare results
     if num_fixed_effects == 0:
         return {
             "random_effects": solution,

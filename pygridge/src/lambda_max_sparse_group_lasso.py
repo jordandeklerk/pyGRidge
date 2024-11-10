@@ -92,7 +92,6 @@ def lambda_max_sparse_group_lasso(
     vector_group_sizes = np.zeros(number_groups, dtype=int)
     vector_weights_groups = np.zeros(number_groups)
 
-    # Create vectors of group sizes, start indices, end indices, and group weights
     for i in range(number_groups):
         group_mask = vector_groups == (i + 1)
         vector_group_sizes[i] = np.sum(group_mask)
@@ -100,32 +99,22 @@ def lambda_max_sparse_group_lasso(
         vector_index_end[i] = vector_index_start[i] + vector_group_sizes[i] - 1
         vector_weights_groups[i] = np.sum(vector_weights_features[group_mask])
 
-    # Treatment if unpenalized features are involved
     if number_zeros_weights > 0:
         active_mask = vector_weights_features == 0
         matrix_x_active = matrix_x[:, active_mask]
 
-        # Solve for beta_active in y = X_active * beta_active
         vector_beta_active = np.linalg.solve(
             matrix_x_active.T @ matrix_x_active, matrix_x_active.T @ vector_y
         )
-
-        # Update beta with beta_active
         vector_beta[active_mask] = vector_beta_active
-
-        # Calculate residual_active = y - X_active * beta_active
         vector_residual_active = vector_y - matrix_x_active @ vector_beta_active
-
-        # Calculate X^T * residual_active
         vector_x_transp_residual_active = matrix_x.T @ vector_residual_active
     else:
-        # Treatment if only penalized features are involved
         vector_x_transp_residual_active = matrix_x.T @ vector_y
 
     vector_max_groups = np.zeros(number_groups)
     solver = BisectionSolver()
 
-    # Scale and perform bisection
     for i in range(number_groups):
         if vector_weights_groups[i] == 0:
             vector_max_groups[i] = 0
@@ -151,6 +140,5 @@ def lambda_max_sparse_group_lasso(
                 vector_temp,
             )
 
-    # Determine lambda_max and perform numeric correction
     lambda_max = np.max(vector_max_groups)
     return lambda_max * 1.00001

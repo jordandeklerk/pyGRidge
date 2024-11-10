@@ -84,7 +84,6 @@ def lambda_max_group_lasso(y, groups, feature_weights, beta, X):
     group_weights = np.zeros(num_groups)
     l2_norm_groups = np.zeros(num_groups)
 
-    # Create vectors of group sizes, start indices, end indices, and group weights
     for i in range(num_groups):
         group_mask = groups == (i + 1)
         group_indices = np.where(group_mask)[0]
@@ -96,7 +95,6 @@ def lambda_max_group_lasso(y, groups, feature_weights, beta, X):
 
     group_weights = np.sqrt(group_weights)
 
-    # Treatment if unpenalized features are involved
     if num_zeros_weights > 0:
         active_mask = feature_weights == 0.0
         X_active = X[:, active_mask]
@@ -111,7 +109,6 @@ def lambda_max_group_lasso(y, groups, feature_weights, beta, X):
     else:
         X_transp_residual_active = X.T @ y
 
-    # Scale X.T * residuals in groups with n * weight * sqrt(group_size), if weight > 0
     for i in range(num_groups):
         if group_weights[i] == 0.0:
             l2_norm_groups[i] = 0.0
@@ -122,6 +119,5 @@ def lambda_max_group_lasso(y, groups, feature_weights, beta, X):
                 np.linalg.norm(X_transp_residual_active[group_slice]) / temp
             )
 
-    # Determine lambda_max and perform numeric correction
     lambda_max = np.max(np.abs(l2_norm_groups))
     return lambda_max * 1.00001

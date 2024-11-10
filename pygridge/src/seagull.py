@@ -16,7 +16,7 @@ def seagull(
     Z=None,
     weights_u=None,
     groups=None,
-    alpha=1.0,  # Changed default to 1.0 to avoid requiring groups by default
+    alpha=1.0,  
     rel_acc=0.0001,
     max_lambda=None,
     xi=0.01,
@@ -262,10 +262,9 @@ def seagull(
         X_tilde = Z.copy()
     b_tilde = np.zeros(p)
 
-    # Initialize index_permutation as identity permutation
     index_permutation = np.arange(1, p + 1)
 
-    if alpha < 1.0:  # Changed from 0 <= alpha < 1.0
+    if alpha < 1.0:  
         # Assign all fixed effects to one group if not assigned
         if p1 > 0 and groups.size == p2:
             groups_temp = np.full(p1, groups.min() - 1, dtype=int)
@@ -431,9 +430,7 @@ def seagull(
             trace_progress=trace_progress,
         )
         res["result"] = "group_lasso"
-        # Rename lambda to lambda_values for consistency
         res["lambda_values"] = res.pop("lambda")
-        # Add beta key containing the coefficients
         if "fixed_effects" in res and "random_effects" in res:
             res["beta"] = np.concatenate(
                 [res["fixed_effects"][-1], res["random_effects"][-1]]
@@ -459,9 +456,7 @@ def seagull(
             trace_progress=trace_progress,
         )
         res["result"] = "sparse_group_lasso"
-        # Rename lambda to lambda_values for consistency
         res["lambda_values"] = res.pop("lambda")
-        # Add beta key containing the coefficients
         if "fixed_effects" in res and "random_effects" in res:
             res["beta"] = np.concatenate(
                 [res["fixed_effects"][-1], res["random_effects"][-1]]

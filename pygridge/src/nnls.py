@@ -176,7 +176,6 @@ def fnnls(
         max_iter = 30 * AtA.shape[0]
 
     if use_parallel and cpu_count() > 1 and k > 1:
-        # Define a partial function with fixed AtA and kwargs
         solve_fn = partial(fnnls_core, AtA, tol=tol, max_iter=max_iter, **kwargs)
         X = np.column_stack(
             Parallel(n_jobs=-1)(delayed(solve_fn)(AtB[:, i]) for i in range(k))
@@ -234,10 +233,9 @@ def fnnls_core(
         w_masked = np.where(~P, w, -np.inf)
         i = np.argmax(w_masked)
         if w_masked[i] == -np.inf:
-            break  # No eligible index found
+            break  
         P[i] = True
 
-        # Solve least squares for variables in P
         AtA_P = AtA[np.ix_(P, P)]
         Atb_P = Atb[P]
         try:
@@ -248,15 +246,12 @@ def fnnls_core(
         s[P] = s_P
         s[~P] = 0.0
 
-        # Inner loop: enforce non-negativity
         while np.any(s[P] <= tol):
             iter_count += 1
             if iter_count >= max_iter:
                 raise ConvergenceError(
                     f"FNNLS failed to converge after {max_iter} iterations."
                 )
-
-            # Indices where s <= tol and P is True
             mask = (s <= tol) & P
             if not np.any(mask):
                 break
@@ -266,14 +261,10 @@ def fnnls_core(
                 alpha = np.min(x[ind] / (x[ind] - s[ind]))
                 alpha = np.minimum(alpha, 1.0)
 
-            # Update x
             x += alpha * (s - x)
-            x = np.maximum(x, 0.0)  # Ensure numerical stability
-
-            # Remove variables where x is approximately zero
+            x = np.maximum(x, 0.0)  
             P = x > tol
 
-            # Recompute s for the new P
             AtA_P = AtA[np.ix_(P, P)]
             Atb_P = Atb[P]
             try:

@@ -102,12 +102,10 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         if not all(p > 0 for p in self.ps):
             raise ValueError("All group sizes in ps must be positive integers")
 
-        # Store attributes
         self.ps_ = self.ps
         self.n_features_in_ = sum(self.ps_)
         self.n_groups_ = len(self.ps_)
 
-        # Validate feature dimensions
         if X.shape[1] != self.n_features_in_:
             raise ValueError(
                 f"X has {X.shape[1]} features but GroupedFeatures is expecting "
@@ -119,7 +117,6 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         ends = np.cumsum(self.ps_).astype(int)
         self.feature_groups_ = [range(start, end) for start, end in zip(starts, ends)]
 
-        # Mark as fitted
         self.is_fitted_ = True
 
         return self
@@ -193,7 +190,6 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         if self.group_operation is None:
             return np.array(feature_names_in)
 
-        # If group operation is specified, generate group-based feature names
         group_names = []
         for i, group_range in enumerate(self.feature_groups_):
             group_names.append(f"group{i}")
@@ -273,7 +269,6 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
             if len(vec) == self.n_features_in_:
                 vec = np.array(vec).reshape(1, -1)
             else:
-                # Try to convert list of lists to 2D array
                 vec = np.array(vec)
                 if vec.shape[1] != self.n_features_in_:
                     raise ValueError(
