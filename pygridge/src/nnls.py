@@ -233,7 +233,7 @@ def fnnls_core(
         w_masked = np.where(~P, w, -np.inf)
         i = np.argmax(w_masked)
         if w_masked[i] == -np.inf:
-            break  
+            break
         P[i] = True
 
         AtA_P = AtA[np.ix_(P, P)]
@@ -262,7 +262,7 @@ def fnnls_core(
                 alpha = np.minimum(alpha, 1.0)
 
             x += alpha * (s - x)
-            x = np.maximum(x, 0.0)  
+            x = np.maximum(x, 0.0)
             P = x > tol
 
             AtA_P = AtA[np.ix_(P, P)]

@@ -331,7 +331,7 @@ class GroupLasso(BaseEstimator, RegressorMixin):
                 )
 
         if self.groups is None:
-            groups = np.arange(1, n_features + 1)  
+            groups = np.arange(1, n_features + 1)
         else:
             groups = check_array(self.groups.reshape(1, -1), ensure_2d=True).ravel()
             if len(groups) != n_features:
@@ -361,7 +361,7 @@ class GroupLasso(BaseEstimator, RegressorMixin):
         )
 
         if self.num_fixed_effects == 0:
-            self.coef_ = result["random_effects"][-1] 
+            self.coef_ = result["random_effects"][-1]
             self.coef_path_ = result["random_effects"]
         else:
             fixed_effects = result["fixed_effects"][-1]

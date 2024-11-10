@@ -2,10 +2,9 @@ r"""Sigma Ridge regression with accelerated leave-one-out cross-validation."""
 
 import numpy as np
 import warnings
-from typing import Optional, List, Union, Dict, Any
+from typing import Optional, Dict, Any
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
-from sklearn.preprocessing import StandardScaler
 from .blockridge import (
     GroupRidgeRegressor,
     MomentTunerSetup,
@@ -26,7 +25,7 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
 
     Parameters
     ----------
-    feature_groups : List[List[int]], optional
+    feature_groups : list[list[int]], optional
         Each sublist contains indices of features belonging to a group.
         If None, each feature is treated as its own group.
     sigma : float, default=1.0
@@ -98,7 +97,7 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
 
     def __init__(
         self,
-        feature_groups: Optional[List[List[int]]] = None,
+        feature_groups: Optional[list[list[int]]] = None,
         sigma: float = 1.0,
         decomposition: str = "default",
         center: bool = True,
@@ -196,11 +195,7 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
             return GroupedFeatures(group_sizes)
 
     def _init_ridge_estimator(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Initialize ridge estimator with appropriate regularization.
-
-        This method attempts to fit a GroupRidgeRegressor with increasingly larger
-        regularization values until a successful fit is achieved. This helps avoid
-        singular matrix issues that can occur with very small regularization values.
+        """Initialize ridge estimator.
 
         Parameters
         ----------
@@ -265,28 +260,27 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         6. Returns the square root of the sigma squared value with minimum error
 
         The sigma range is either specified by sigma_range parameter or automatically
-        determined as (0.001 * sigma, 10 * sigma).
+        determined using \sigma_max from moment tuning.
         """
         if not hasattr(self, "ridge_estimator_"):
             self._init_ridge_estimator(X, y)
 
         moment_tuner = MomentTunerSetup(self.ridge_estimator_)
 
-        # Define sigma squared values to evaluate
         if self.sigma_range is None:
-            sigma_range = (0.001 * self.sigma, 10 * self.sigma)
+            sigma_max = np.sqrt(moment_tuner.get_sigma_squared_max())
+            # Define grid as [10^(-3) * sigma_max, sigma_max]
+            sigma_range = (1e-3 * sigma_max, sigma_max)
         else:
             sigma_range = self.sigma_range
 
         if self.optimization_method == "grid_search":
-            # Use logarithmic grid
             sigma_squared_values = np.logspace(
                 2 * np.log10(sigma_range[0]),
                 2 * np.log10(sigma_range[1]),
                 num=20,
             )
         else:
-            # Use geometric sequence for path
             sigma_squared_values = np.geomspace(
                 sigma_range[0] ** 2,
                 sigma_range[1] ** 2,
@@ -303,7 +297,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
 
         best_idx = np.argmin(path_results["errors"])
         sigma_opt = np.sqrt(sigma_squared_values[best_idx])
-
         self.moment_tuner_ = moment_tuner
 
         return sigma_opt
@@ -326,15 +319,13 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         X, y = check_X_y(X, y, accept_sparse=False)
         self._validate_params()
 
-        # Convert X to float64 to avoid type casting issues
         X = X.astype(np.float64)
 
-        n_samples, n_features = X.shape
+        _, n_features = X.shape
         self.n_features_in_ = n_features
         self.feature_names_in_ = np.arange(n_features)
         self.feature_groups_ = self._init_feature_groups(n_features)
 
-        # Store mean and scale for compatibility
         if self.center:
             self.X_mean_ = np.mean(X, axis=0)
             X = X - self.X_mean_
@@ -360,7 +351,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
                 "Falling back to default regularization."
             )
             self.sigma_opt_ = self.sigma
-            # Use very low regularization for better performance
             self.lambda_ = np.ones(self.feature_groups_.num_groups) * 0.001
 
         try:
@@ -368,7 +358,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
             self.ridge_estimator_.fit(X, y)
         except SingularMatrixError:
             warnings.warn("Singular matrix detected. Using higher regularization.")
-            # Use higher regularization for numerical stability
             self.lambda_ = np.maximum(self.lambda_, 10.0)
             self._init_ridge_estimator(X, y)
 

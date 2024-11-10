@@ -16,7 +16,7 @@ def seagull(
     Z=None,
     weights_u=None,
     groups=None,
-    alpha=1.0,  
+    alpha=1.0,
     rel_acc=0.0001,
     max_lambda=None,
     xi=0.01,
@@ -264,7 +264,7 @@ def seagull(
 
     index_permutation = np.arange(1, p + 1)
 
-    if alpha < 1.0:  
+    if alpha < 1.0:
         # Assign all fixed effects to one group if not assigned
         if p1 > 0 and groups.size == p2:
             groups_temp = np.full(p1, groups.min() - 1, dtype=int)

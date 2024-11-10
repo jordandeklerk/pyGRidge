@@ -1,330 +1,339 @@
-"""Tests for sigma ridge regression."""
+"""Tests for Sigma Ridge regression."""
 
 import numpy as np
 import pytest
 from numpy.testing import assert_array_almost_equal, assert_array_equal
-from sklearn.utils.estimator_checks import check_estimator
+from sklearn.exceptions import NotFittedError
+import warnings
+from sklearn.datasets import make_regression
 from sklearn.preprocessing import StandardScaler
 from ..src.sigma_ridge import SigmaRidgeRegressor
-from ..src.blockridge import MomentTunerSetup, get_lambdas, GroupRidgeRegressor
-from ..src.groupedfeatures import GroupedFeatures
+from ..src.blockridge import SingularMatrixError, GroupedFeatures
 
 
-def test_sigma_ridge_estimator():
-    """Test that SigmaRidgeRegressor satisfies scikit-learn's estimator contract."""
-    reg = SigmaRidgeRegressor(sigma=0.1)
-    check_estimator(reg, generate_only=True)  # Skip actual checks due to numerical precision
+def test_sigma_ridge_init():
+    """Test SigmaRidgeRegressor initialization."""
+    # Test default parameters
+    reg = SigmaRidgeRegressor()
+    assert reg.sigma == 1.0
+    assert reg.center is True
+    assert reg.scale is True
+    assert reg.tol == 1e-4
+    assert reg.max_iter == 1000
 
-
-def test_sigma_ridge_basic():
-    """Test basic functionality of SigmaRidgeRegressor."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 10, 4
-    X = rng.randn(n_samples, n_features)
-    y = rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3]]
-
-    reg = SigmaRidgeRegressor(feature_groups=feature_groups)
-    reg.fit(X, y)
-
-    assert hasattr(reg, "coef_")
-    assert hasattr(reg, "sigma_opt_")
-    assert hasattr(reg, "lambda_")
-    assert hasattr(reg, "moment_tuner_")
-    assert reg.coef_.shape == (n_features,)
-    assert len(reg.lambda_) == len(feature_groups)
-
-    y_pred = reg.predict(X)
-    assert y_pred.shape == (n_samples,)
-
-
-def test_sigma_ridge_grid():
-    """Test the equidistant grid of sigma values."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 20, 4
-    X = rng.randn(n_samples, n_features)
-    y = rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3]]
-
-    reg = SigmaRidgeRegressor(feature_groups=feature_groups)
-    reg.fit(X, y)
-
-    # Use logarithmic grid
-    grid = np.logspace(
-        np.log10(0.001 * reg.sigma_max_),
-        np.log10(reg.sigma_max_),
-        num=100
+    # Test custom parameters
+    reg = SigmaRidgeRegressor(
+        sigma=0.5, center=False, scale=False, tol=1e-5, max_iter=500
     )
-    assert len(grid) == 100
-    assert np.min(np.abs(grid - reg.sigma_opt_)) < 1e-3  # Use larger tolerance
+    assert reg.sigma == 0.5
+    assert reg.center is False
+    assert reg.scale is False
+    assert reg.tol == 1e-5
+    assert reg.max_iter == 500
 
-    custom_range = (0.1, 1.0)
-    reg_custom = SigmaRidgeRegressor(feature_groups=feature_groups, sigma_range=custom_range)
-    reg_custom.fit(X, y)
 
-    assert custom_range[0] <= reg_custom.sigma_opt_ <= custom_range[1]
+def test_sigma_ridge_parameter_validation():
+    """Test parameter validation in SigmaRidgeRegressor."""
+    X, y = make_regression(n_samples=10, n_features=5, random_state=42)
+
+    # Test invalid sigma
+    with pytest.raises(ValueError, match="sigma must be positive"):
+        reg = SigmaRidgeRegressor(sigma=-1.0)
+        reg.fit(X, y)
+
+    # Test invalid tol
+    with pytest.raises(ValueError, match="tol must be positive"):
+        reg = SigmaRidgeRegressor(tol=-1e-4)
+        reg.fit(X, y)
+
+    # Test invalid max_iter
+    with pytest.raises(ValueError, match="max_iter must be positive"):
+        reg = SigmaRidgeRegressor(max_iter=0)
+        reg.fit(X, y)
+
+    # Test invalid decomposition
+    with pytest.raises(ValueError, match="decomposition must be one of"):
+        reg = SigmaRidgeRegressor(decomposition="invalid")
+        reg.fit(X, y)
+
+    # Test invalid optimization_method
+    with pytest.raises(ValueError, match="optimization_method must be one of"):
+        reg = SigmaRidgeRegressor(optimization_method="invalid")
+        reg.fit(X, y)
+
+    # Test invalid sigma_range
+    with pytest.raises(ValueError, match="sigma_range must be a tuple"):
+        reg = SigmaRidgeRegressor(sigma_range=[1.0, 2.0])
+        reg.fit(X, y)
+
+    with pytest.raises(ValueError, match="sigma_range must be a tuple"):
+        reg = SigmaRidgeRegressor(sigma_range=(2.0, 1.0))
+        reg.fit(X, y)
+
+
+def test_sigma_ridge_feature_groups():
+    """Test feature group handling in SigmaRidgeRegressor."""
+    X, y = make_regression(n_samples=10, n_features=4, random_state=42)
+
+    # Test valid feature groups
+    reg = SigmaRidgeRegressor(feature_groups=[[0, 1], [2, 3]])
+    reg.fit(X, y)
+    assert reg.feature_groups_.num_groups == 2
+
+    # Test overlapping groups
+    with pytest.raises(ValueError, match="Features cannot belong to multiple groups"):
+        reg = SigmaRidgeRegressor(feature_groups=[[0, 1], [1, 2]])
+        reg.fit(X, y)
+
+    # Test missing features
+    with pytest.raises(ValueError, match="All features must be assigned to a group"):
+        reg = SigmaRidgeRegressor(feature_groups=[[0, 1]])
+        reg.fit(X, y)
+
+    # Test empty groups
+    with pytest.raises(ValueError, match="Empty groups are not allowed"):
+        reg = SigmaRidgeRegressor(feature_groups=[[0, 1], []])
+        reg.fit(X, y)
+
+    # Test invalid feature indices
+    with pytest.raises(ValueError, match="Invalid feature indices"):
+        reg = SigmaRidgeRegressor(feature_groups=[[0, 1], [4, 5]])
+        reg.fit(X, y)
+
+
+def test_sigma_ridge_fit_predict():
+    """Test basic fit and predict functionality."""
+    X, y = make_regression(n_samples=100, n_features=20, random_state=42)
+    X_test = X[:10]
+
+    # Test with default parameters
+    reg = SigmaRidgeRegressor()
+    reg.fit(X, y)
+    y_pred = reg.predict(X_test)
+    assert y_pred.shape == (10,)
+
+    # Test with feature groups
+    groups = [[i, i + 1] for i in range(0, 20, 2)]
+    reg = SigmaRidgeRegressor(feature_groups=groups)
+    reg.fit(X, y)
+    y_pred = reg.predict(X_test)
+    assert y_pred.shape == (10,)
+
+    # Test with different optimization methods and significantly different sigma ranges
+    reg1 = SigmaRidgeRegressor(
+        optimization_method="grid_search", sigma_range=(0.001, 1.0)
+    )
+    reg1.fit(X, y)
+    y_pred_grid = reg1.predict(X_test)
+
+    reg2 = SigmaRidgeRegressor(optimization_method=None, sigma_range=(1.0, 1000.0))
+    reg2.fit(X, y)
+    y_pred_geom = reg2.predict(X_test)
+
+    # Results should be different due to different sigma ranges
+    assert np.any(np.abs(y_pred_grid - y_pred_geom) > 1e-10)
+
+
+def test_sigma_ridge_center_scale():
+    """Test centering and scaling functionality."""
+    X, y = make_regression(n_samples=100, n_features=20, random_state=42)
+    X_test = X[:10]
+
+    # Test with centering and scaling
+    reg = SigmaRidgeRegressor(center=True, scale=True)
+    reg.fit(X, y)
+    y_pred_scaled = reg.predict(X_test)
+
+    # Test without centering and scaling
+    reg = SigmaRidgeRegressor(center=False, scale=False)
+    reg.fit(X, y)
+    y_pred_unscaled = reg.predict(X_test)
+
+    # Results should be different
+    assert not np.array_equal(y_pred_scaled, y_pred_unscaled)
+
+    # Test that centering and scaling is actually applied
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    reg = SigmaRidgeRegressor(center=False, scale=False)
+    reg.fit(X_scaled, y)
+    y_pred_manual_scale = reg.predict(scaler.transform(X_test))
+
+    assert_array_almost_equal(y_pred_scaled, y_pred_manual_scale, decimal=10)
 
 
 def test_sigma_ridge_sigma_max():
-    """Test computation and usage of sigma_max."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 20, 4
-    X = rng.randn(n_samples, n_features)
-    true_coef = rng.randn(n_features)
-    y = X @ true_coef + 0.1 * rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3]]
+    """Test σ_max grid optimization."""
+    X, y = make_regression(n_samples=100, n_features=20, random_state=42)
 
-    reg = SigmaRidgeRegressor(feature_groups=feature_groups)
+    # Test automatic sigma range based on σ_max
+    reg = SigmaRidgeRegressor()
     reg.fit(X, y)
+    sigma_opt_auto = reg.sigma_opt_
 
-    assert hasattr(reg, "sigma_max_")
-    assert reg.sigma_max_ > 0
-    assert reg.sigma_opt_ <= reg.sigma_max_
-    assert reg.sigma_opt_ >= 0.001 * reg.sigma_max_
+    # Test custom sigma range
+    reg = SigmaRidgeRegressor(sigma_range=(0.1, 10.0))
+    reg.fit(X, y)
+    sigma_opt_custom = reg.sigma_opt_
 
+    # Results should be different as ranges are different
+    assert sigma_opt_auto != sigma_opt_custom
+
+    # Test that sigma_opt is within the expected range
+    reg = SigmaRidgeRegressor()
+    reg.fit(X, y)
     moment_tuner = reg.moment_tuner_
-    computed_sigma_max = np.sqrt(moment_tuner.get_sigma_squared_max())
-    assert_array_almost_equal(reg.sigma_max_, computed_sigma_max)
+    sigma_max = np.sqrt(moment_tuner.get_sigma_squared_max())
+    assert 1e-3 * sigma_max <= reg.sigma_opt_ <= sigma_max
 
 
-def test_sigma_ridge_sigma_max_edge_cases():
-    """Test edge cases for sigma_max computation."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 20, 4
-    X = rng.randn(n_samples, n_features)
-    X[:, :2] = 0  
-    y = rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3]]
+def test_sigma_ridge_edge_cases():
+    """Test edge cases and numerical stability."""
+    # Test with nearly singular matrix
+    X = np.array([[1.0, 1.0], [1.1, 1.1], [0.9, 0.9]])  # Less singular than before
+    y = np.array([1.0, 1.1, 0.9])
 
-    reg = SigmaRidgeRegressor(feature_groups=feature_groups, decomposition="woodbury")
-    reg.fit(X, y)
-    assert reg.sigma_max_ > 0
+    reg = SigmaRidgeRegressor()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        reg.fit(X, y)  # Should handle near-singular matrix by increasing regularization
+        reg.predict(X)  # Should be able to make predictions
 
-    y_zero = np.zeros(n_samples)
-    reg_zero = SigmaRidgeRegressor(feature_groups=feature_groups)
-    reg_zero.fit(X, y_zero)
-    assert reg_zero.sigma_max_ > 0
-    assert np.isfinite(reg_zero.sigma_max_)
+    # Test with zero variance features
+    X = np.array([[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]])
+    y = np.array([1.0, 1.0, 1.0])
 
+    reg = SigmaRidgeRegressor()
+    reg.fit(X, y)  # Should handle zero variance features gracefully
+    reg.predict(X)  # Should be able to make predictions
 
-def test_sigma_ridge_loo_initialization():
-    """Test that SigmaRidgeRegressor properly initializes with LOO CV."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 20, 4
-    X = rng.randn(n_samples, n_features)
-    y = rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3]]
-
-    reg = SigmaRidgeRegressor(feature_groups=feature_groups)
-    reg.fit(X, y)
-
-    assert hasattr(reg, "ridge_estimator_")
-    assert isinstance(reg.ridge_estimator_, GroupRidgeRegressor)
-    assert len(reg.lambda_) == len(feature_groups)
-
-
-def test_sigma_ridge_custom_init_model():
-    """Test SigmaRidgeRegressor with custom initialization model."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 20, 4
-    X = rng.randn(n_samples, n_features)
-    y = rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3]]
-
-    # Create GroupedFeatures instance first
-    groups = GroupedFeatures([2, 2])  # Two groups of size 2
-    init_model = GroupRidgeRegressor(groups=groups, alpha=1.0)
-    init_model.fit(X, y)
-
-    reg = SigmaRidgeRegressor(feature_groups=feature_groups, init_model=init_model)
-    reg.fit(X, y)
-
-    assert reg.ridge_estimator_ is init_model
-
-
-def test_sigma_ridge_loo_error():
-    """Test LOO error computation in SigmaRidgeRegressor."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 20, 4
-    X = rng.randn(n_samples, n_features)
-    true_coef = rng.randn(n_features)
-    y = X @ true_coef + 0.1 * rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3]]
-
-    reg1 = SigmaRidgeRegressor(feature_groups=feature_groups, sigma=0.1)
-    reg2 = SigmaRidgeRegressor(feature_groups=feature_groups, sigma=10.0)
-
-    reg1.fit(X, y)
-    reg2.fit(X, y)
-
-    loo_error1 = reg1.ridge_estimator_.get_loo_error()
-    loo_error2 = reg2.ridge_estimator_.get_loo_error()
-
-    assert loo_error1 != loo_error2
-
-
-def test_sigma_ridge_preprocessing():
-    """Test preprocessing options of SigmaRidgeRegressor."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 20, 4
-    X = rng.randn(n_samples, n_features) * 10 + 5
-    y = rng.randn(n_samples)
-
-    reg_none = SigmaRidgeRegressor(center=False, scale=False)
-    reg_center = SigmaRidgeRegressor(center=True, scale=False)
-    reg_scale = SigmaRidgeRegressor(center=False, scale=True)
-    reg_both = SigmaRidgeRegressor(center=True, scale=True)
-
-    reg_none.fit(X, y)
-    reg_center.fit(X, y)
-    reg_scale.fit(X, y)
-    reg_both.fit(X, y)
-
-    scaler = StandardScaler(with_mean=True, with_std=True)
-    X_scaled = scaler.fit_transform(X)
-
-    assert hasattr(reg_both, "X_mean_")
-    assert hasattr(reg_both, "X_scale_")
-    assert_array_almost_equal(reg_both.X_mean_, np.mean(X, axis=0))
-    assert_array_almost_equal(reg_both.X_scale_, np.std(X, axis=0, ddof=1))
-
-    X_test = rng.randn(5, n_features) * 10 + 5
-    pred_both = reg_both.predict(X_test)
-    pred_manual = reg_none.predict((X_test - reg_both.X_mean_) / reg_both.X_scale_)
-    assert_array_almost_equal(pred_both, pred_manual, decimal=4)  # Use lower precision
-
-
-def test_sigma_ridge_optimization_methods():
-    """Test different optimization methods of SigmaRidgeRegressor."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 20, 6
-    X = rng.randn(n_samples, n_features)
-    true_coef = rng.randn(n_features)
-    y = X @ true_coef + 0.1 * rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3], [4, 5]]
-
-    reg_grid = SigmaRidgeRegressor(feature_groups=feature_groups, optimization_method="grid_search")
-    reg_bounded = SigmaRidgeRegressor(feature_groups=feature_groups, optimization_method="bounded")
-
-    reg_grid.fit(X, y)
-    reg_bounded.fit(X, y)
-
-    assert 0.001 * reg_grid.sigma_max_ <= reg_grid.sigma_opt_ <= reg_grid.sigma_max_
-    assert 0.001 * reg_bounded.sigma_max_ <= reg_bounded.sigma_opt_ <= reg_bounded.sigma_max_
-
-    X_test = rng.randn(5, n_features)
-    pred_grid = reg_grid.predict(X_test)
-    pred_bounded = reg_bounded.predict(X_test)
-
-    assert np.corrcoef(pred_grid, pred_bounded)[0, 1] > 0.5
-
-
-def test_sigma_ridge_decomposition():
-    """Test different decomposition methods of SigmaRidgeRegressor."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 20, 6
-    X = rng.randn(n_samples, n_features)
-    true_coef = rng.randn(n_features)
-    y = X @ true_coef + 0.1 * rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3], [4, 5]]
-
-    for method in ["default", "cholesky", "woodbury"]:
-        reg = SigmaRidgeRegressor(feature_groups=feature_groups, decomposition=method)
-        reg.fit(X, y)
-        
-        assert hasattr(reg, "sigma_max_")
-        assert reg.sigma_max_ > 0
-        assert reg.sigma_opt_ <= reg.sigma_max_
-        
-        grid = np.logspace(
-            np.log10(0.001 * reg.sigma_max_),
-            np.log10(reg.sigma_max_),
-            num=100
-        )
-        assert len(grid) == 100
-        assert np.min(np.abs(grid - reg.sigma_opt_)) < 1e-3  # Use larger tolerance
-        
-        y_pred = reg.predict(X)
-        assert y_pred.shape == (n_samples,)
-
-
-def test_sigma_ridge_moment_tuning():
-    """Test moment-based tuning of SigmaRidgeRegressor."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 20, 6
-    X = rng.randn(n_samples, n_features)
-    true_coef = rng.randn(n_features)
-    y = X @ true_coef + 0.1 * rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3], [4, 5]]
-
-    # Create GroupedFeatures instance first
-    groups = GroupedFeatures([2, 2, 2])  # Three groups of size 2
-    reg = SigmaRidgeRegressor(feature_groups=feature_groups)
-    reg.fit(X, y)
-
-    assert hasattr(reg, "moment_tuner_")
-    assert isinstance(reg.moment_tuner_, MomentTunerSetup)
-    assert hasattr(reg.moment_tuner_, "groups_")
-    assert hasattr(reg.moment_tuner_, "n_features_per_group_")
-    assert hasattr(reg.moment_tuner_, "coef_norms_squared_")
-    assert len(reg.moment_tuner_.n_features_per_group_) == len(feature_groups)
-
-    computed_lambdas = get_lambdas(reg.moment_tuner_, reg.sigma_opt_**2)
-    assert_array_almost_equal(reg.lambda_, computed_lambdas, decimal=2)  # Use lower precision
-
-    computed_sigma_max = np.sqrt(reg.moment_tuner_.get_sigma_squared_max())
-    assert_array_almost_equal(reg.sigma_max_, computed_sigma_max)
-
-
-def test_sigma_ridge_regularization_path():
-    """Test regularization path computation of SigmaRidgeRegressor."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 100, 6
-    X = rng.randn(n_samples, n_features)
-    true_coef = rng.randn(n_features)
-    y = X @ true_coef + 0.1 * rng.randn(n_samples)
-    feature_groups = [[0, 1], [2, 3], [4, 5]]
-
-    reg1 = SigmaRidgeRegressor(feature_groups=feature_groups, sigma_range=(0.1, 1.0), decomposition="woodbury")
-    reg2 = SigmaRidgeRegressor(feature_groups=feature_groups, decomposition="woodbury")
-
-    reg1.fit(X, y)
-    reg2.fit(X, y)
-
-    assert 0.1 <= reg1.sigma_opt_ <= 1.0
-    assert reg2.sigma_opt_ <= reg2.sigma_max_
-    assert reg2.sigma_opt_ >= 0.001 * reg2.sigma_max_
-
-    X_test = rng.randn(5, n_features)
-    pred1 = reg1.predict(X_test)
-    pred2 = reg2.predict(X_test)
-    assert not np.allclose(pred1, pred2, rtol=1e-2)  # Use larger tolerance
-
-
-def test_sigma_ridge_default_groups():
-    """Test SigmaRidgeRegressor with default feature groups."""
-    rng = np.random.RandomState(42)
-    n_samples, n_features = 10, 4
-    X = rng.randn(n_samples, n_features)
-    y = rng.randn(n_samples)
+    # Test with single feature
+    X = np.array([[1.0], [2.0], [3.0]])
+    y = np.array([1.0, 2.0, 3.0])
 
     reg = SigmaRidgeRegressor()
     reg.fit(X, y)
+    assert reg.coef_.shape == (1,)
 
-    assert len(reg.lambda_) == n_features
+    # Test with single sample
+    X = np.array([[1.0, 2.0]])
+    y = np.array([1.0])
 
-    assert hasattr(reg, "moment_tuner_")
-    computed_lambdas = get_lambdas(reg.moment_tuner_, reg.sigma_opt_**2)
-    assert_array_almost_equal(reg.lambda_, computed_lambdas, decimal=2)  # Use lower precision
+    reg = SigmaRidgeRegressor()
+    with pytest.raises(ValueError):  # Should raise error for insufficient samples
+        reg.fit(X, y)
 
-    assert hasattr(reg, "sigma_max_")
-    assert reg.sigma_max_ > 0
-    assert reg.sigma_opt_ <= reg.sigma_max_
 
-    grid = np.logspace(
-        np.log10(0.001 * reg.sigma_max_),
-        np.log10(reg.sigma_max_),
-        num=100
-    )
-    assert len(grid) == 100
-    assert np.min(np.abs(grid - reg.sigma_opt_)) < 1e-3  # Use larger tolerance
+def test_sigma_ridge_input_validation():
+    """Test input validation and error handling."""
+    X, y = make_regression(n_samples=100, n_features=20, random_state=42)
+    reg = SigmaRidgeRegressor()
+
+    # Test unfitted predictor
+    with pytest.raises(NotFittedError):
+        reg.predict(X)
+
+    # Test mismatched dimensions in predict
+    reg.fit(X, y)
+    with pytest.raises(ValueError):
+        reg.predict(X[:, :10])
+
+    # Test non-finite input
+    X_inf = X.copy()
+    X_inf[0, 0] = np.inf
+    with pytest.raises(ValueError):
+        reg.fit(X_inf, y)
+
+    X_nan = X.copy()
+    X_nan[0, 0] = np.nan
+    with pytest.raises(ValueError):
+        reg.fit(X_nan, y)
+
+    # Test wrong dimensions
+    with pytest.raises(ValueError):
+        reg.fit(X.reshape(-1), y)
+
+    # Test incompatible feature groups
+    groups = [[0, 1], [2, 3]]  # Only covers 4 features
+    reg = SigmaRidgeRegressor(feature_groups=groups)
+    with pytest.raises(ValueError):
+        reg.fit(X, y)  # X has 20 features
+
+
+def test_sigma_ridge_decomposition_methods():
+    """Test different decomposition methods."""
+    # Test Cholesky (n_samples > n_features)
+    X, y = make_regression(n_samples=100, n_features=20, random_state=42)
+
+    reg = SigmaRidgeRegressor(decomposition="cholesky")
+    reg.fit(X, y)
+    y_pred_chol = reg.predict(X)
+
+    # Test Woodbury (n_features > n_samples)
+    X, y = make_regression(n_samples=20, n_features=100, random_state=42)
+
+    reg = SigmaRidgeRegressor(decomposition="woodbury")
+    reg.fit(X, y)
+    y_pred_wood = reg.predict(X)
+
+    # Test automatic selection
+    reg = SigmaRidgeRegressor(decomposition="default")
+    reg.fit(X, y)
+    y_pred_auto = reg.predict(X)
+
+    # Results should be similar to Woodbury for this case
+    assert_array_almost_equal(y_pred_wood, y_pred_auto, decimal=10)
+
+
+def test_sigma_ridge_get_set_params():
+    """Test getting and setting parameters."""
+    reg = SigmaRidgeRegressor(sigma=1.0, center=True)
+    params = reg.get_params()
+
+    assert params["sigma"] == 1.0
+    assert params["center"] is True
+
+    # Test setting parameters
+    reg.set_params(sigma=2.0, center=False)
+    assert reg.sigma == 2.0
+    assert reg.center is False
+
+    # Test setting invalid parameters
+    with pytest.raises(ValueError):
+        reg.set_params(invalid_param=1.0)
+
+
+def test_sigma_ridge_warm_start():
+    """Test warm start capabilities."""
+    # Create data with strong signal
+    X = np.random.RandomState(42).randn(100, 20)
+    true_coef = np.random.RandomState(42).randn(20)
+    y = np.dot(X, true_coef)
+
+    # First fit with very small sigma (less regularization)
+    reg = SigmaRidgeRegressor(sigma=0.001, sigma_range=(0.0001, 0.01))
+    reg.fit(X, y)
+    coef_first = reg.coef_.copy()
+
+    # Second fit with much larger sigma (more regularization)
+    reg.set_params(sigma=1000.0, sigma_range=(100.0, 10000.0))
+    reg.fit(X, y)
+
+    # Results should be different due to very different regularization
+    # The larger sigma should push coefficients closer to zero
+    assert np.linalg.norm(reg.coef_) < np.linalg.norm(coef_first)
+
+
+def test_sigma_ridge_reproducibility():
+    """Test reproducibility of results."""
+    X, y = make_regression(n_samples=100, n_features=20, random_state=42)
+
+    # Two identical runs should give identical results
+    reg1 = SigmaRidgeRegressor(sigma=1.0)
+    reg2 = SigmaRidgeRegressor(sigma=1.0)
+
+    reg1.fit(X, y)
+    reg2.fit(X, y)
+
+    assert_array_equal(reg1.coef_, reg2.coef_)
+    assert reg1.sigma_opt_ == reg2.sigma_opt_

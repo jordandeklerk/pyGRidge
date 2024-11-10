@@ -89,7 +89,7 @@ def test_dimension_mismatch(solver):
     group_weight = 1.0
 
     # Test with wrong vector_weights length
-    vector_weights = np.array([1.0, 1.0])  # length 2 instead of 3
+    vector_weights = np.array([1.0, 1.0])
     vector_in = np.array([0.5, 0.3, 0.2])
     with pytest.raises(ValueError, match="rows must match the length"):
         solver.solve(
@@ -104,7 +104,7 @@ def test_dimension_mismatch(solver):
 
     # Test with wrong vector_in length
     vector_weights = np.array([1.0, 1.0, 1.0])
-    vector_in = np.array([0.5, 0.3])  # length 2 instead of 3
+    vector_in = np.array([0.5, 0.3])
     with pytest.raises(ValueError, match="rows must match the length"):
         solver.solve(
             rows,

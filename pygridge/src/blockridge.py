@@ -171,8 +171,12 @@ class CholeskyRidgePredictor(BaseRidgePredictor):
         # Check if gram matrix is nearly singular
         cond = np.linalg.cond(self.gram_matrix_)
         if cond > 1e15:
-            raise SingularMatrixError(
-                f"Gram matrix is nearly singular with condition number: {cond}"
+            # Add small regularization to stabilize the matrix
+            eps = np.finfo(self.gram_matrix_.dtype).eps
+            reg_term = eps * np.trace(self.gram_matrix_) * np.eye(self.n_features_)
+            self.gram_matrix_ += reg_term
+            warnings.warn(
+                f"Added regularization term {eps:.2e} * tr(X^T X) * I to handle near-singular matrix"
             )
 
         self.gram_reg_ = self.gram_matrix_.copy()
@@ -180,7 +184,7 @@ class CholeskyRidgePredictor(BaseRidgePredictor):
         self.lower_ = True
 
     def _update_cholesky(self):
-        r"""Update the Cholesky decomposition of the regularized Gram matrix.
+        """Update the Cholesky decomposition of the regularized Gram matrix.
 
         Raises
         ------
@@ -968,6 +972,37 @@ class MomentTunerSetup:
             / self.n_samples_**2
         )
 
+    def get_sigma_squared_max(self) -> float:
+        r"""Compute the maximum value of :math:`\sigma^2`.
+
+        The maximum :math:`\sigma^2` is defined as:
+
+        .. math::
+            \sigma_{\max}^2 = \max_g \left\{ \frac{\hat{u}_g}{v_g} \right\}
+
+        where for each group :math:`g`:
+
+        .. math::
+            \hat{u}_g &= \|\tilde{w}_{G_g}\|_2^2
+            v_g &= \|N_{G_g,\cdot}\|_F^2/n
+
+        Returns
+        -------
+        float
+            The maximum value of :math:`\sigma^2`.
+        """
+        u_g = self.coef_norms_squared_
+        v_g = self.gram_inv_norms_squared_
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratios = u_g / v_g
+            valid_ratios = ratios[np.isfinite(ratios)]
+
+        if len(valid_ratios) == 0:
+            return 1.0
+
+        return np.max(valid_ratios)
+
 
 def sigma_squared_path(
     estimator: GroupRidgeRegressor,
@@ -1106,11 +1141,9 @@ def get_lambdas(moment_tuner: MomentTunerSetup, sigma_squared: float) -> np.ndar
     if sigma_squared < 0:
         raise ValueError("sigma_squared must be non-negative")
 
-    # Compute alpha squared values
     alpha_squared = get_alpha_s_squared(moment_tuner, sigma_squared)
     group_ratios = moment_tuner.n_features_per_group_ / moment_tuner.n_samples_
 
-    # Handle numerical stability
     LARGE_VALUE = 1e12
     with np.errstate(divide="ignore", invalid="ignore"):
         lambdas = sigma_squared * group_ratios / alpha_squared
@@ -1178,7 +1211,7 @@ def get_alpha_s_squared(
         moment_tuner.coef_norms_squared_
         - sigma_squared * moment_tuner.gram_inv_norms_squared_
     )
-    rhs = np.maximum(rhs, 0)  # Ensure non-negativity
+    rhs = np.maximum(rhs, 0)
 
     try:
         # Solve non-negative least squares problem
