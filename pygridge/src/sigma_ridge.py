@@ -1,4 +1,4 @@
-r"""Sigma Ridge regression with accelerated leave-one-out cross-validation."""
+"""Sigma Ridge regression with accelerated leave-one-out cross-validation."""
 
 import numpy as np
 import warnings
@@ -22,6 +22,10 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
     approach to map a single hyperparameter :math:`\sigma` to group-specific regularization
     parameters :math:`\lambda(\sigma)`. The mapping is optimized using accelerated leave-one-out
     cross-validation.
+
+    The initial ridge estimator is fit using accelerated LOO CV with a single regularization
+    parameter (treating all features as one group) to find the optimal one-dimensional
+    ridge regression parameter.
 
     Parameters
     ----------
@@ -120,13 +124,7 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         self.max_iter = max_iter
 
     def _validate_params(self):
-        """Validate parameters.
-
-        Raises
-        ------
-        ValueError
-            If parameters are invalid.
-        """
+        """Validate parameters."""
         if self.sigma <= 0:
             raise ValueError("sigma must be positive")
         if self.tol <= 0:
@@ -156,18 +154,7 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
                 )
 
     def _init_feature_groups(self, n_features: int) -> GroupedFeatures:
-        """Initialize feature groups.
-
-        Parameters
-        ----------
-        n_features : int
-            Number of features.
-
-        Returns
-        -------
-        GroupedFeatures
-            The initialized grouped features object.
-        """
+        """Initialize feature groups."""
         if self.feature_groups is None:
             return GroupedFeatures([1] * n_features)
         else:
@@ -195,7 +182,10 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
             return GroupedFeatures(group_sizes)
 
     def _init_ridge_estimator(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Initialize ridge estimator.
+        """Initialize ridge estimator using accelerated LOO CV.
+
+        The initial ridge estimator uses a single regularization parameter (treating
+        all features as one group) optimized via accelerated LOO CV.
 
         Parameters
         ----------
@@ -208,27 +198,79 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         ------
         SingularMatrixError
             If fitting fails even with the largest regularization value.
-
-        Notes
-        -----
-        The method tries regularization values from 0.001 to 100.0 in increasing order.
-        For each value, it attempts to fit the GroupRidgeRegressor. If fitting succeeds,
-        it stores the estimator and breaks the loop. If all values fail, it raises
-        a SingularMatrixError.
         """
-        regularization_values = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+        # Create single group for initial ridge estimator
+        n_features = X.shape[1]
+        initial_groups = GroupedFeatures([n_features])
 
-        for alpha in regularization_values:
-            try:
-                self.ridge_estimator_ = GroupRidgeRegressor(
-                    groups=self.feature_groups_,
-                    alpha=np.ones(self.feature_groups_.num_groups) * alpha,
-                )
-                self.ridge_estimator_.fit(X, y)
-                break
-            except SingularMatrixError:
-                if alpha == regularization_values[-1]:
-                    raise
+        # Handle zero variance features by adding a small constant to diagonal
+        X_gram = X.T @ X
+        if np.any(np.diag(X_gram) == 0):
+            X = X + np.random.normal(0, 1e-10, X.shape)
+
+        try:
+            initial_alpha = 0.001
+            initial_estimator = GroupRidgeRegressor(
+                groups=initial_groups,
+                alpha=np.array([initial_alpha]),
+            )
+            initial_estimator.fit(X, y)
+        except SingularMatrixError:
+            # If initial fit fails, try with larger regularization
+            initial_alpha = 1.0
+            initial_estimator = GroupRidgeRegressor(
+                groups=initial_groups,
+                alpha=np.array([initial_alpha]),
+            )
+            initial_estimator.fit(X, y)
+
+        moment_tuner = MomentTunerSetup(initial_estimator)
+        if self.sigma_range is None:
+            sigma_max = np.sqrt(moment_tuner.get_sigma_squared_max())
+            sigma_range = (1e-3 * sigma_max, sigma_max)
+        else:
+            sigma_range = self.sigma_range
+
+        if self.optimization_method == "grid_search":
+            sigma_squared_values = np.logspace(
+                2 * np.log10(sigma_range[0]),
+                2 * np.log10(sigma_range[1]),
+                num=20,
+            )
+        else:
+            sigma_squared_values = np.geomspace(
+                sigma_range[0] ** 2,
+                sigma_range[1] ** 2,
+                num=10,
+            )
+
+        # Compute optimal sigma squared using accelerated LOO CV
+        path_results = sigma_squared_path(
+            initial_estimator,
+            moment_tuner,
+            sigma_squared_values,
+            max_iter=self.max_iter,
+            tol=self.tol,
+        )
+
+        best_idx = np.argmin(path_results["errors"])
+        optimal_sigma_squared = sigma_squared_values[best_idx]
+        optimal_lambda = get_lambdas(moment_tuner, optimal_sigma_squared)
+
+        try:
+            self.ridge_estimator_ = GroupRidgeRegressor(
+                groups=self.feature_groups_,
+                alpha=np.ones(self.feature_groups_.num_groups) * optimal_lambda[0],
+            )
+            self.ridge_estimator_.fit(X, y)
+        except SingularMatrixError:
+            warnings.warn("Singular matrix detected. Using higher regularization.")
+            self.ridge_estimator_ = GroupRidgeRegressor(
+                groups=self.feature_groups_,
+                alpha=np.ones(self.feature_groups_.num_groups)
+                * max(optimal_lambda[0], 10.0),
+            )
+            self.ridge_estimator_.fit(X, y)
 
     def _optimize_sigma(self, X: np.ndarray, y: np.ndarray) -> float:
         """Optimize :math:`\sigma` by minimizing CV error.
@@ -269,7 +311,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
 
         if self.sigma_range is None:
             sigma_max = np.sqrt(moment_tuner.get_sigma_squared_max())
-            # Define grid as [10^(-3) * sigma_max, sigma_max]
             sigma_range = (1e-3 * sigma_max, sigma_max)
         else:
             sigma_range = self.sigma_range
@@ -343,8 +384,11 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         self.y_ = y
 
         try:
+            self._init_ridge_estimator(X, y)
             self.sigma_opt_ = self._optimize_sigma(X, y)
             self.lambda_ = get_lambdas(self.moment_tuner_, self.sigma_opt_**2)
+            self.ridge_estimator_.set_params(alpha=self.lambda_)
+            self.ridge_estimator_.fit(X, y)
         except Exception as e:
             warnings.warn(
                 f"Failed to compute optimal parameters: {str(e)}. "
@@ -352,14 +396,11 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
             )
             self.sigma_opt_ = self.sigma
             self.lambda_ = np.ones(self.feature_groups_.num_groups) * 0.001
-
-        try:
-            self.ridge_estimator_.set_params(alpha=self.lambda_)
+            self.ridge_estimator_ = GroupRidgeRegressor(
+                groups=self.feature_groups_,
+                alpha=self.lambda_,
+            )
             self.ridge_estimator_.fit(X, y)
-        except SingularMatrixError:
-            warnings.warn("Singular matrix detected. Using higher regularization.")
-            self.lambda_ = np.maximum(self.lambda_, 10.0)
-            self._init_ridge_estimator(X, y)
 
         self.coef_ = self.ridge_estimator_.coef_
         self.intercept_ = 0.0
@@ -440,8 +481,9 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
             else:
                 own_params[key] = value
 
-        if ridge_params and hasattr(self, "ridge_estimator_"):
-            self.ridge_estimator_.set_params(**ridge_params)
         if own_params:
             super().set_params(**own_params)
+        if ridge_params and hasattr(self, "ridge_estimator_"):
+            self.ridge_estimator_.set_params(**ridge_params)
+
         return self

@@ -166,18 +166,30 @@ class CholeskyRidgePredictor(BaseRidgePredictor):
             raise ValueError("X contains NaN or infinity values.")
 
         self.n_samples_, self.n_features_ = X.shape
-        self.gram_matrix_ = np.dot(X.T, X) / self.n_samples_
+
+        # Add small regularization to handle near-singular matrices
+        eps = np.finfo(X.dtype).eps
+        reg_term = eps * np.trace(X.T @ X) * np.eye(self.n_features_)
+        self.gram_matrix_ = (np.dot(X.T, X) / self.n_samples_) + reg_term
 
         # Check if gram matrix is nearly singular
         cond = np.linalg.cond(self.gram_matrix_)
         if cond > 1e15:
-            # Add small regularization to stabilize the matrix
-            eps = np.finfo(self.gram_matrix_.dtype).eps
-            reg_term = eps * np.trace(self.gram_matrix_) * np.eye(self.n_features_)
+            # Add larger regularization for very ill-conditioned matrices
+            reg_term = 1e-6 * np.trace(X.T @ X) * np.eye(self.n_features_)
             self.gram_matrix_ += reg_term
             warnings.warn(
-                f"Added regularization term {eps:.2e} * tr(X^T X) * I to handle near-singular matrix"
+                f"Added regularization term {1e-6:.2e} * tr(X^T X) * I to handle near-singular matrix"
             )
+
+        # Handle zero variance features
+        diag = np.diag(self.gram_matrix_)
+        zero_var_mask = diag < eps
+        if np.any(zero_var_mask):
+            # For zero variance features, use a larger regularization
+            reg_term = np.zeros_like(self.gram_matrix_)
+            np.fill_diagonal(reg_term, zero_var_mask.astype(float))
+            self.gram_matrix_ += reg_term
 
         self.gram_reg_ = self.gram_matrix_.copy()
         self._update_cholesky()
@@ -194,20 +206,57 @@ class CholeskyRidgePredictor(BaseRidgePredictor):
         try:
             self.gram_reg_chol_ = np.linalg.cholesky(self.gram_reg_)
         except np.linalg.LinAlgError:
+            # Progressive regularization strategy
+            regularization_factors = [1e-10, 1e-8, 1e-6, 1e-4, 1e-2, 1e-1, 1.0]
+            trace_term = max(np.trace(self.gram_reg_), 1e-10)
+
+            for factor in regularization_factors:
+                try:
+                    reg_matrix = self.gram_reg_.copy()
+                    # Add regularization to diagonal
+                    np.fill_diagonal(
+                        reg_matrix, np.diag(reg_matrix) + factor * trace_term
+                    )
+                    self.gram_reg_chol_ = np.linalg.cholesky(reg_matrix)
+                    self.gram_reg_ = reg_matrix
+                    warnings.warn(f"Added regularization {factor:.2e} * tr(X^T X) * I")
+                    return
+                except np.linalg.LinAlgError:
+                    continue
+
+            # If all regularization attempts fail, try one last time with very large regularization
+            try:
+                reg_matrix = self.gram_reg_.copy()
+                np.fill_diagonal(reg_matrix, np.diag(reg_matrix) + trace_term)
+                self.gram_reg_chol_ = np.linalg.cholesky(reg_matrix)
+                self.gram_reg_ = reg_matrix
+                warnings.warn("Added maximum regularization")
+                return
+            except np.linalg.LinAlgError:
+                pass
+
             raise SingularMatrixError(
                 "Failed to compute Cholesky decomposition. Matrix may not be positive definite."
             )
 
     def set_params(self, groups: GroupedFeatures, alpha: np.ndarray):
+        """Update the regularization parameters."""
         diag = groups.group_expand(alpha)
         if not isinstance(diag, np.ndarray):
             diag = np.array(diag)
 
-        # Ensure diag has the correct shape
         if len(diag) != self.n_features_:
             raise ValueError(
                 f"Alpha expansion length ({len(diag)}) must match the number of features ({self.n_features_})"
             )
+
+        eps = np.finfo(self.gram_matrix_.dtype).eps
+        min_alpha = eps * np.trace(self.gram_matrix_)
+        diag = np.maximum(diag, min_alpha)
+
+        zero_var_mask = np.diag(self.gram_matrix_) < eps
+        if np.any(zero_var_mask):
+            diag[zero_var_mask] = max(1e-4 * np.trace(self.gram_matrix_), 1.0)
 
         self.gram_reg_ = self.gram_matrix_ + np.diag(diag)
         self._update_cholesky()

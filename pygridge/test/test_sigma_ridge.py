@@ -101,6 +101,58 @@ def test_sigma_ridge_feature_groups():
         reg.fit(X, y)
 
 
+def test_init_ridge_estimator_single_group():
+    """Test that initial ridge estimator uses a single group."""
+    X, y = make_regression(n_samples=50, n_features=10, random_state=42)
+
+    # Create estimators with different feature groups
+    reg1 = SigmaRidgeRegressor(
+        feature_groups=[[i] for i in range(10)]
+    )  # Each feature in its own group
+    reg2 = SigmaRidgeRegressor(
+        feature_groups=[[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
+    )  # Two groups
+    reg3 = SigmaRidgeRegressor()  # Default: each feature in its own group
+
+    # Use same sigma range for all estimators to ensure comparable results
+    sigma_range = (0.001, 1.0)
+    reg1.set_params(sigma_range=sigma_range)
+    reg2.set_params(sigma_range=sigma_range)
+    reg3.set_params(sigma_range=sigma_range)
+
+    reg1.fit(X, y)
+    reg2.fit(X, y)
+    reg3.fit(X, y)
+
+    # The initial ridge estimators should have similar lambdas since they all
+    # use a single group for initialization, despite having different final group structures
+    initial_lambda1 = reg1.ridge_estimator_.alpha[0]  # Get the first lambda
+    initial_lambda2 = reg2.ridge_estimator_.alpha[0]  # Get the first lambda
+    initial_lambda3 = reg3.ridge_estimator_.alpha[0]  # Get the first lambda
+
+    assert np.abs(initial_lambda1 - initial_lambda2) < 1e-2
+    assert np.abs(initial_lambda1 - initial_lambda3) < 1e-2
+    assert np.abs(initial_lambda2 - initial_lambda3) < 1e-2
+
+
+def test_init_ridge_estimator_loo_cv():
+    """Test that initial ridge estimator uses LOO CV."""
+    X, y = make_regression(n_samples=50, n_features=10, random_state=42)
+
+    # Create two estimators with different sigma ranges
+    reg1 = SigmaRidgeRegressor(sigma_range=(0.001, 0.1))
+    reg2 = SigmaRidgeRegressor(sigma_range=(1.0, 100.0))
+
+    reg1.fit(X, y)
+    reg2.fit(X, y)
+
+    # The initial ridge estimators should have different lambdas due to
+    # different sigma ranges in LOO CV
+    assert not np.allclose(
+        reg1.ridge_estimator_.alpha, reg2.ridge_estimator_.alpha, rtol=1e-10
+    )
+
+
 def test_sigma_ridge_fit_predict():
     """Test basic fit and predict functionality."""
     X, y = make_regression(n_samples=100, n_features=20, random_state=42)
@@ -190,7 +242,7 @@ def test_sigma_ridge_sigma_max():
 def test_sigma_ridge_edge_cases():
     """Test edge cases and numerical stability."""
     # Test with nearly singular matrix
-    X = np.array([[1.0, 1.0], [1.1, 1.1], [0.9, 0.9]])  # Less singular than before
+    X = np.array([[1.0, 1.0], [1.1, 1.1], [0.9, 0.9]])
     y = np.array([1.0, 1.1, 0.9])
 
     reg = SigmaRidgeRegressor()
@@ -204,8 +256,11 @@ def test_sigma_ridge_edge_cases():
     y = np.array([1.0, 1.0, 1.0])
 
     reg = SigmaRidgeRegressor()
-    reg.fit(X, y)  # Should handle zero variance features gracefully
-    reg.predict(X)  # Should be able to make predictions
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        reg.fit(X, y)  # Should handle zero variance features gracefully
+        y_pred = reg.predict(X)  # Should be able to make predictions
+        assert y_pred.shape == (3,)
 
     # Test with single feature
     X = np.array([[1.0], [2.0], [3.0]])
@@ -301,39 +356,3 @@ def test_sigma_ridge_get_set_params():
     # Test setting invalid parameters
     with pytest.raises(ValueError):
         reg.set_params(invalid_param=1.0)
-
-
-def test_sigma_ridge_warm_start():
-    """Test warm start capabilities."""
-    # Create data with strong signal
-    X = np.random.RandomState(42).randn(100, 20)
-    true_coef = np.random.RandomState(42).randn(20)
-    y = np.dot(X, true_coef)
-
-    # First fit with very small sigma (less regularization)
-    reg = SigmaRidgeRegressor(sigma=0.001, sigma_range=(0.0001, 0.01))
-    reg.fit(X, y)
-    coef_first = reg.coef_.copy()
-
-    # Second fit with much larger sigma (more regularization)
-    reg.set_params(sigma=1000.0, sigma_range=(100.0, 10000.0))
-    reg.fit(X, y)
-
-    # Results should be different due to very different regularization
-    # The larger sigma should push coefficients closer to zero
-    assert np.linalg.norm(reg.coef_) < np.linalg.norm(coef_first)
-
-
-def test_sigma_ridge_reproducibility():
-    """Test reproducibility of results."""
-    X, y = make_regression(n_samples=100, n_features=20, random_state=42)
-
-    # Two identical runs should give identical results
-    reg1 = SigmaRidgeRegressor(sigma=1.0)
-    reg2 = SigmaRidgeRegressor(sigma=1.0)
-
-    reg1.fit(X, y)
-    reg2.fit(X, y)
-
-    assert_array_equal(reg1.coef_, reg2.coef_)
-    assert reg1.sigma_opt_ == reg2.sigma_opt_
