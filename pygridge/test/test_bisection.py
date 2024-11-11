@@ -145,10 +145,10 @@ def test_tolerance_scaling(solver):
     rows = 3
     alpha = 0.5
     left_border = 0.0
-    right_border = 1000.0  # Large value to test scaling
+    right_border = 1000.0
     group_weight = 1.0
     vector_weights = np.array([1.0, 1.0, 1.0])
-    vector_in = np.array([500.0, 300.0, 200.0])  # Large values
+    vector_in = np.array([500.0, 300.0, 200.0])
 
     # With scaling
     solver_with_scaling = BisectionSolver(scale_tol=True)

@@ -60,7 +60,6 @@ def fitted_model(sample_data, sample_groups):
     """Create a fitted GroupRidgeRegressor."""
     X, y = sample_data
     groups = sample_groups
-    groups.fit(X)  # Fit the groups first
     model = GroupRidgeRegressor(groups=groups)
     return model.fit(X, y)
 
@@ -72,7 +71,7 @@ class DynamicGroupedFeatures(GroupedFeatures):
         n_features = X.shape[1]
         # Create equal-sized groups based on number of features
         if n_features == 1:
-            self.ps = [1]  # Single feature, single group
+            self.ps = [1]
         else:
             group_size = n_features // 2  # Split features into 2 groups
             remainder = n_features % 2
@@ -85,7 +84,7 @@ class DynamicGroupedFeatures(GroupedFeatures):
 def test_scikit_learn_compatibility():
     """Test scikit-learn estimator compatibility."""
     # Create a dummy model with dynamic groups that will adapt to any input
-    groups = DynamicGroupedFeatures([1, 1])  # Initial groups don't matter
+    groups = DynamicGroupedFeatures([1, 1])
     model = GroupRidgeRegressor(groups=groups)
 
     # Run the scikit-learn compatibility checks
@@ -107,7 +106,6 @@ class TestGroupRidgeRegressor:
 
     def test_validate_params(self, sample_groups):
         """Test parameter validation."""
-        # Valid case
         model = GroupRidgeRegressor(groups=sample_groups)
         model._validate_params()
 
@@ -115,22 +113,21 @@ class TestGroupRidgeRegressor:
         with pytest.raises(ValueError):
             empty_groups = GroupedFeatures([])
             model = GroupRidgeRegressor(groups=empty_groups)
-            model.groups_ = empty_groups  # Simulate fit
+            model.groups_ = empty_groups
             model._validate_params()
 
         with pytest.raises(ValueError):
             zero_groups = GroupedFeatures([0, 1, 2])
             model = GroupRidgeRegressor(groups=zero_groups)
-            model.groups_ = zero_groups  # Simulate fit
+            model.groups_ = zero_groups
             model._validate_params()
 
     def test_fit(self, sample_data, sample_groups):
         """Test model fitting."""
         X, y = sample_data
-        sample_groups.fit(X)  # Fit groups first
+        sample_groups.fit(X)
         model = GroupRidgeRegressor(groups=sample_groups)
 
-        # Test successful fit
         model.fit(X, y)
         assert hasattr(model, "coef_")
         assert hasattr(model, "n_features_in_")
@@ -141,7 +138,7 @@ class TestGroupRidgeRegressor:
         # Test predictor selection with small dimensions
         X_small = X[:, :10]
         small_groups = GroupedFeatures([5, 5])
-        small_groups.fit(X_small)  # Fit groups with the data
+        small_groups.fit(X_small)
         model_small = GroupRidgeRegressor(groups=small_groups)
         model_small.fit(X_small, y)
         assert isinstance(model_small.predictor_, CholeskyRidgePredictor)
@@ -152,7 +149,7 @@ class TestGroupRidgeRegressor:
         y_large = np.random.randn(n_samples)
 
         large_groups = GroupedFeatures([50, 50])
-        large_groups.fit(X_large)  # Fit groups with the data
+        large_groups.fit(X_large)
         # Use stronger regularization
         model_large = GroupRidgeRegressor(
             groups=large_groups, alpha=np.array([100.0, 100.0])
@@ -181,7 +178,7 @@ class TestGroupRidgeRegressor:
         assert "alpha" in params
 
         new_groups = GroupedFeatures([3, 3])
-        new_groups.fit(np.zeros((1, 6)))  # Fit with dummy data
+        new_groups.fit(np.zeros((1, 6)))
         model.set_params(groups=new_groups)
         assert model.groups == new_groups
 
@@ -296,16 +293,14 @@ def test_numerical_stability():
     X_large = np.random.randn(10, 5) * 1e10
     y_large = np.random.randn(10) * 1e10
     groups = GroupedFeatures([2, 3])
-    groups.fit(X_large)  # Fit groups with the data
+    groups.fit(X_large)
     model = GroupRidgeRegressor(groups=groups)
 
-    # This should still work despite large values
     model.fit(X_large, y_large)
 
     # Test with very small values
     X_small = np.random.randn(10, 5) * 1e-10
     y_small = np.random.randn(10) * 1e-10
-    groups.fit(X_small)  # Fit groups with the data
+    groups.fit(X_small)
 
-    # This should still work despite small values
     model.fit(X_small, y_small)
