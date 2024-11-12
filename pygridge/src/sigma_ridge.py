@@ -219,7 +219,7 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         initial_groups = GroupedFeatures([n_features])
         initial_groups.fit(X)  # Fit the initial groups
 
-        # Handle zero variance features 
+        # Handle zero variance features
         X_gram = X.T @ X
         if np.any(np.diag(X_gram) == 0):
             X = X + np.random.normal(0, 1e-10, X.shape)

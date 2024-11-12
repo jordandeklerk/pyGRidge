@@ -84,7 +84,9 @@ class DynamicGroupedFeatures(GroupedFeatures):
 def test_scikit_learn_compatibility():
     """Test scikit-learn estimator compatibility."""
     # Create a dummy model with dynamic groups that will adapt to any input
-    groups = DynamicGroupedFeatures([1, 1])  # Fixed syntax error: [1, 1] instead of [1 1]
+    groups = DynamicGroupedFeatures(
+        [1, 1]
+    )  # Fixed syntax error: [1, 1] instead of [1 1]
     model = GroupRidgeRegressor(groups=groups)
 
     # Run the scikit-learn compatibility checks

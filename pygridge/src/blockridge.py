@@ -759,7 +759,7 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
             Returns self.
         """
         X, y = check_X_y(X, y, accept_sparse=False, multi_output=False)
-        
+
         # Convert X and y to float64 if they are not already floating point
         if not np.issubdtype(X.dtype, np.floating):
             X = X.astype(np.float64)

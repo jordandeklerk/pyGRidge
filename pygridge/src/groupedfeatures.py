@@ -53,7 +53,9 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         self.ps = tuple(ps) if not isinstance(ps, tuple) else ps
         self.group_operation = group_operation
 
-    def _validate_ps(self, ps: Union[List[int], Tuple[int, ...], np.ndarray]) -> List[int]:
+    def _validate_ps(
+        self, ps: Union[List[int], Tuple[int, ...], np.ndarray]
+    ) -> List[int]:
         """Validate the ps parameter without altering its type.
 
         Parameters
@@ -73,20 +75,18 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         ValueError
             If any group size is not positive.
         """
-        # Check if input is array-like
         if isinstance(ps, str):
             raise TypeError(f"ps must be array-like, got str")
         if not isinstance(ps, (list, tuple, np.ndarray)):
-            raise TypeError(f"ps must be a tuple or array-like, got {type(ps).__name__}")
+            raise TypeError(
+                f"ps must be a tuple or array-like, got {type(ps).__name__}"
+            )
 
-        # Convert to list for validation
         ps_list = list(ps)
 
-        # Ensure all elements are integers
         if not all(isinstance(p, (int, np.integer)) for p in ps_list):
             raise TypeError("All group sizes in ps must be integers")
 
-        # Ensure all elements are positive
         if not all(p > 0 for p in ps_list):
             raise ValueError("All group sizes in ps must be positive integers")
 
@@ -108,23 +108,20 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         self : object
             Returns self.
         """
-        # Validate input
         X = check_array(X, accept_sparse=True)
         self.n_features_in_ = X.shape[1]
 
-        # Validate and store group sizes
         self.ps_ = self._validate_ps(self.ps)
         self.n_groups_ = len(self.ps_)
 
-        # Adjust group sizes if they don't match the number of features
         expected_features = sum(self.ps_)
         if X.shape[1] != expected_features:
-            # Adjust group sizes to match input features
             avg_size = X.shape[1] // len(self.ps_)
             remainder = X.shape[1] % len(self.ps_)
-            self.ps_ = [avg_size + (1 if i < remainder else 0) for i in range(len(self.ps_))]
+            self.ps_ = [
+                avg_size + (1 if i < remainder else 0) for i in range(len(self.ps_))
+            ]
 
-        # Precompute group indices
         starts = np.cumsum([0] + self.ps_[:-1]).astype(int)
         ends = np.cumsum(self.ps_).astype(int)
         self.feature_groups_ = [range(start, end) for start, end in zip(starts, ends)]
@@ -175,7 +172,6 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         if self.group_operation is None:
             return X
 
-        # Apply group operation to each group
         transformed_groups = []
         for group_range in self.feature_groups_:
             group_data = X[:, group_range]

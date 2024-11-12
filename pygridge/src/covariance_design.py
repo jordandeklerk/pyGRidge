@@ -894,7 +894,7 @@ def set_groups(design, groups_or_p):
 
     if groups_or_p.__class__.__name__ == "GroupedFeatures":
         # Check if the GroupedFeatures instance is fitted
-        if not hasattr(groups_or_p, 'is_fitted_') or not groups_or_p.is_fitted_:
+        if not hasattr(groups_or_p, "is_fitted_") or not groups_or_p.is_fitted_:
             raise NotFittedError("GroupedFeatures instance is not fitted")
 
         if isinstance(design, BlockCovarianceDesign):
