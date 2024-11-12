@@ -6,6 +6,7 @@ from typing import List, Callable, Union
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils import check_array
 from sklearn.utils.validation import check_is_fitted
+from sklearn.exceptions import NotFittedError
 
 from .groupedfeatures import GroupedFeatures, fill
 
@@ -841,6 +842,9 @@ def simulate_rotated_design(cov, n, rotated_measure=None):
     if rotated_measure is not None and not callable(rotated_measure):
         raise TypeError("'rotated_measure' must be callable")
 
+    # Check if the design is fitted
+    check_is_fitted(cov, ["covariance_"])
+
     if rotated_measure is None:
         rotated_measure = np.random.normal
 
@@ -888,8 +892,11 @@ def set_groups(design, groups_or_p):
             design.p = groups_or_p
         return
 
-    # Check if groups_or_p is a GroupedFeatures instance using __class__ comparison
     if groups_or_p.__class__.__name__ == "GroupedFeatures":
+        # Check if the GroupedFeatures instance is fitted
+        if not hasattr(groups_or_p, 'is_fitted_') or not groups_or_p.is_fitted_:
+            raise NotFittedError("GroupedFeatures instance is not fitted")
+
         if isinstance(design, BlockCovarianceDesign):
             if len(groups_or_p.ps) != len(design.blocks):
                 raise ValueError(
@@ -899,8 +906,7 @@ def set_groups(design, groups_or_p):
                 block.p = group_size
             design.groups = groups_or_p
         else:
-            design.p = groups_or_p.nfeatures()
+            design.p = groups_or_p.n_features_in_
         return
 
-    # If we get here, the input type was invalid
     raise TypeError("groups_or_p must be an instance of GroupedFeatures or int.")
