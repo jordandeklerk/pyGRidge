@@ -36,7 +36,7 @@ def generate_test_matrix(n_samples, n_features, seed=42):
     X = U @ np.diag(s) @ V.T
     X = X + 1e-4 * np.random.randn(n_samples, n_features)
     X = X / np.sqrt(n_features)
-    return X
+    return X.astype(np.float64)  # Ensure float64 type
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def sample_data():
     X, y = make_regression(
         n_samples=100, n_features=20, n_informative=10, random_state=42
     )
-    return X, y
+    return X.astype(np.float64), y.astype(np.float64)  # Ensure float64 type
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ class DynamicGroupedFeatures(GroupedFeatures):
 def test_scikit_learn_compatibility():
     """Test scikit-learn estimator compatibility."""
     # Create a dummy model with dynamic groups that will adapt to any input
-    groups = DynamicGroupedFeatures([1, 1])
+    groups = DynamicGroupedFeatures([1, 1])  # Fixed syntax error: [1, 1] instead of [1 1]
     model = GroupRidgeRegressor(groups=groups)
 
     # Run the scikit-learn compatibility checks

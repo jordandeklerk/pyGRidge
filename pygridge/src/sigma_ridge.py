@@ -199,11 +199,10 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         SingularMatrixError
             If fitting fails even with the largest regularization value.
         """
-        # Create single group for initial ridge estimator
         n_features = X.shape[1]
         initial_groups = GroupedFeatures([n_features])
 
-        # Handle zero variance features by adding a small constant to diagonal
+        # Handle zero variance features 
         X_gram = X.T @ X
         if np.any(np.diag(X_gram) == 0):
             X = X + np.random.normal(0, 1e-10, X.shape)
@@ -216,7 +215,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
             )
             initial_estimator.fit(X, y)
         except SingularMatrixError:
-            # If initial fit fails, try with larger regularization
             initial_alpha = 1.0
             initial_estimator = GroupRidgeRegressor(
                 groups=initial_groups,
@@ -244,7 +242,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
                 num=10,
             )
 
-        # Compute optimal sigma squared using accelerated LOO CV
         path_results = sigma_squared_path(
             initial_estimator,
             moment_tuner,

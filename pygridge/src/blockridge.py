@@ -759,6 +759,12 @@ class GroupRidgeRegressor(BaseEstimator, RegressorMixin):
             Returns self.
         """
         X, y = check_X_y(X, y, accept_sparse=False, multi_output=False)
+        
+        # Convert X and y to float64 if they are not already floating point
+        if not np.issubdtype(X.dtype, np.floating):
+            X = X.astype(np.float64)
+        if not np.issubdtype(y.dtype, np.floating):
+            y = y.astype(np.float64)
 
         self.n_features_in_ = X.shape[1]
         self.feature_names_in_ = np.arange(self.n_features_in_)
