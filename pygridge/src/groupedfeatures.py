@@ -1,6 +1,6 @@
 """Create and manage grouped feature structures for statistical modeling."""
 
-from typing import Callable, Union, TypeVar, List, Optional
+from typing import Callable, Union, TypeVar, List, Optional, Tuple
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import check_array, check_is_fitted
@@ -17,8 +17,8 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
 
     Parameters
     ----------
-    ps : list or array-like of int
-        List of positive integers representing the size of each group.
+    ps : tuple or array-like of int, default=(1,)
+        Tuple or array-like of positive integers representing the size of each group.
     group_operation : callable, default=None
         Optional function to apply to each group during transformation.
         If None, features are kept as is.
@@ -39,40 +39,58 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
     Raises
     ------
     TypeError
-        If `ps` is not a list or contains non-integer elements.
+        If `ps` is not a tuple or array-like, or contains non-integer elements.
     ValueError
         If any group size is not positive.
     """
 
     def __init__(
         self,
-        ps: Union[List[int], np.ndarray],
+        ps: Union[Tuple[int, ...], List[int], np.ndarray] = (1,),
         group_operation: Optional[Callable] = None,
     ):
-        if isinstance(ps, np.ndarray):
-            ps = ps.tolist()
-        if not isinstance(ps, list):
-            raise TypeError(
-                f"ps must be a list of positive integers, got {type(ps).__name__}"
-            )
-        if not all(isinstance(p, (int, np.integer)) for p in ps):
-            raise TypeError("All group sizes in ps must be integers")
-        if not all(p > 0 for p in ps):
-            raise ValueError("All group sizes in ps must be positive integers")
-
-        self.ps = ps
+        # Store parameters as passed without modification
+        self.ps = tuple(ps) if not isinstance(ps, tuple) else ps
         self.group_operation = group_operation
 
-    @property
-    def num_groups(self) -> int:
-        """Get the number of groups.
+    def _validate_ps(self, ps: Union[List[int], Tuple[int, ...], np.ndarray]) -> List[int]:
+        """Validate the ps parameter without altering its type.
+
+        Parameters
+        ----------
+        ps : array-like
+            List or tuple of group sizes to validate.
 
         Returns
         -------
-        int
-            Number of groups.
+        list
+            Validated list of group sizes.
+
+        Raises
+        ------
+        TypeError
+            If ps is not a list, tuple, or array-like, or contains non-integer elements.
+        ValueError
+            If any group size is not positive.
         """
-        return len(self.ps)
+        # Check if input is array-like
+        if isinstance(ps, str):
+            raise TypeError(f"ps must be array-like, got str")
+        if not isinstance(ps, (list, tuple, np.ndarray)):
+            raise TypeError(f"ps must be a tuple or array-like, got {type(ps).__name__}")
+
+        # Convert to list for validation
+        ps_list = list(ps)
+
+        # Ensure all elements are integers
+        if not all(isinstance(p, (int, np.integer)) for p in ps_list):
+            raise TypeError("All group sizes in ps must be integers")
+
+        # Ensure all elements are positive
+        if not all(p > 0 for p in ps_list):
+            raise ValueError("All group sizes in ps must be positive integers")
+
+        return [int(p) for p in ps_list]
 
     def fit(self, X, y=None):
         """Fit the GroupedFeatures transformer.
@@ -92,25 +110,19 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         """
         # Validate input
         X = check_array(X, accept_sparse=True)
+        self.n_features_in_ = X.shape[1]
 
-        if not isinstance(self.ps, list):
-            raise TypeError(
-                f"ps must be a list of positive integers, got {type(self.ps).__name__}"
-            )
-        if not all(isinstance(p, int) for p in self.ps):
-            raise TypeError("All group sizes in ps must be integers")
-        if not all(p > 0 for p in self.ps):
-            raise ValueError("All group sizes in ps must be positive integers")
-
-        self.ps_ = self.ps
-        self.n_features_in_ = sum(self.ps_)
+        # Validate and store group sizes
+        self.ps_ = self._validate_ps(self.ps)
         self.n_groups_ = len(self.ps_)
 
-        if X.shape[1] != self.n_features_in_:
-            raise ValueError(
-                f"X has {X.shape[1]} features but GroupedFeatures is expecting "
-                f"{self.n_features_in_} features as per the ps parameter."
-            )
+        # Adjust group sizes if they don't match the number of features
+        expected_features = sum(self.ps_)
+        if X.shape[1] != expected_features:
+            # Adjust group sizes to match input features
+            avg_size = X.shape[1] // len(self.ps_)
+            remainder = X.shape[1] % len(self.ps_)
+            self.ps_ = [avg_size + (1 if i < remainder else 0) for i in range(len(self.ps_))]
 
         # Precompute group indices
         starts = np.cumsum([0] + self.ps_[:-1]).astype(int)
@@ -118,8 +130,24 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         self.feature_groups_ = [range(start, end) for start, end in zip(starts, ends)]
 
         self.is_fitted_ = True
-
         return self
+
+    @property
+    def num_groups(self) -> int:
+        """Get the number of groups.
+
+        Returns
+        -------
+        int
+            Number of groups.
+
+        Raises
+        ------
+        NotFittedError
+            If the transformer has not been fitted.
+        """
+        check_is_fitted(self)
+        return self.n_groups_
 
     def transform(self, X):
         """Transform the data by applying the group operation if specified.
@@ -270,7 +298,7 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
                 vec = np.array(vec).reshape(1, -1)
             else:
                 vec = np.array(vec)
-                if vec.shape[1] != self.n_features_in_:
+                if vec.ndim > 1 and vec.shape[1] != self.n_features_in_:
                     raise ValueError(
                         f"vec must be array-like with {self.n_features_in_} features"
                     )
@@ -359,7 +387,7 @@ class GroupedFeatures(BaseEstimator, TransformerMixin):
         if num_groups <= 0:
             raise ValueError("num_groups must be a positive integer")
 
-        return cls([group_size] * num_groups)
+        return cls(tuple([group_size] * num_groups))
 
 
 def fill(value: T, length: int) -> List[T]:

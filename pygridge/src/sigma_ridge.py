@@ -153,10 +153,22 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
                     "sigma_range must be a tuple of two positive floats (min, max) where min < max"
                 )
 
-    def _init_feature_groups(self, n_features: int) -> GroupedFeatures:
-        """Initialize feature groups."""
+    def _init_feature_groups(self, X: np.ndarray) -> GroupedFeatures:
+        """Initialize feature groups.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Training data.
+
+        Returns
+        -------
+        GroupedFeatures
+            Fitted GroupedFeatures instance.
+        """
+        n_features = X.shape[1]
         if self.feature_groups is None:
-            return GroupedFeatures([1] * n_features)
+            groups = GroupedFeatures([1] * n_features)
         else:
             all_features = set()
             group_sizes = []
@@ -179,7 +191,11 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
             if all_features != set(range(n_features)):
                 raise ValueError("All features must be assigned to a group")
 
-            return GroupedFeatures(group_sizes)
+            groups = GroupedFeatures(group_sizes)
+
+        # Fit the GroupedFeatures instance
+        groups.fit(X)
+        return groups
 
     def _init_ridge_estimator(self, X: np.ndarray, y: np.ndarray) -> None:
         """Initialize ridge estimator using accelerated LOO CV.
@@ -201,6 +217,7 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         """
         n_features = X.shape[1]
         initial_groups = GroupedFeatures([n_features])
+        initial_groups.fit(X)  # Fit the initial groups
 
         # Handle zero variance features 
         X_gram = X.T @ X
@@ -362,7 +379,6 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
         _, n_features = X.shape
         self.n_features_in_ = n_features
         self.feature_names_in_ = np.arange(n_features)
-        self.feature_groups_ = self._init_feature_groups(n_features)
 
         if self.center:
             self.X_mean_ = np.mean(X, axis=0)
@@ -379,6 +395,9 @@ class SigmaRidgeRegressor(BaseEstimator, RegressorMixin):
 
         self.X_ = X
         self.y_ = y
+
+        # Initialize and fit feature groups
+        self.feature_groups_ = self._init_feature_groups(X)
 
         try:
             self._init_ridge_estimator(X, y)

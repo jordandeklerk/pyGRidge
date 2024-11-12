@@ -20,12 +20,12 @@ def sample_data():
 @pytest.fixture
 def sample_groups():
     """Create sample GroupedFeatures instance."""
-    return GroupedFeatures([3, 3])  # 2 groups of 3 features each
+    return GroupedFeatures((3, 3))  # 2 groups of 3 features each
 
 
 def test_scikit_learn_compatibility():
     """Test scikit-learn estimator compatibility."""
-    groups = GroupedFeatures([2, 2])
+    groups = GroupedFeatures((2, 2))  # Two groups of 2 features each
     check_estimator(groups)
 
 
@@ -33,23 +33,37 @@ def test_initialization():
     """Test GroupedFeatures initialization."""
     # Valid initialization
     groups = GroupedFeatures([2, 3])
-    assert groups.ps == [2, 3]
+    assert_array_equal(groups.ps, (2, 3))
 
-    # Invalid initializations
+    groups = GroupedFeatures((2, 3))
+    assert_array_equal(groups.ps, (2, 3))
+
+    groups = GroupedFeatures(np.array([2, 3]))
+    assert_array_equal(groups.ps, (2, 3))
+
+    # Invalid initializations won't raise errors here anymore
+    # Instead, they should raise errors during fit
     with pytest.raises(TypeError):
-        GroupedFeatures("not a list")
+        groups = GroupedFeatures("not a list")  # Should not raise here
+        groups.fit(np.random.randn(10, 6))  # Raises TypeError during fit
+
     with pytest.raises(TypeError):
-        GroupedFeatures([1.5, 2])  # non-integer
+        groups = GroupedFeatures([1.5, 2])  # Should not raise here
+        groups.fit(np.random.randn(10, 6))  # Raises TypeError during fit
+
     with pytest.raises(ValueError):
-        GroupedFeatures([0, 1])  # zero group size
+        groups = GroupedFeatures([0, 1])  # Should not raise here
+        groups.fit(np.random.randn(10, 6))  # Raises ValueError during fit
+
     with pytest.raises(ValueError):
-        GroupedFeatures([-1, 2])  # negative group size
+        groups = GroupedFeatures([-1, 2])  # Should not raise here
+        groups.fit(np.random.randn(10, 6))  # Raises ValueError during fit
 
 
 def test_from_group_size():
     """Test from_group_size class method."""
     groups = GroupedFeatures.from_group_size(2, 3)
-    assert groups.ps == [2, 2, 2]
+    assert_array_equal(groups.ps, (2, 2, 2))
 
     with pytest.raises(TypeError):
         GroupedFeatures.from_group_size(1.5, 2)  # non-integer group_size
@@ -78,13 +92,13 @@ def test_fit_transform(sample_data, sample_groups):
     def mean_operation(group_data):
         return np.mean(group_data, axis=1, keepdims=True)
 
-    groups_with_op = GroupedFeatures([3, 3], group_operation=mean_operation)
+    groups_with_op = GroupedFeatures((3, 3), group_operation=mean_operation)
     groups_with_op.fit(sample_data)
     X_transformed = groups_with_op.transform(sample_data)
     assert X_transformed.shape == (100, 2)  # One value per group
 
     # Test transform before fit
-    groups_unfit = GroupedFeatures([3, 3])
+    groups_unfit = GroupedFeatures((3, 3))
     with pytest.raises(NotFittedError):
         groups_unfit.transform(sample_data)
 
@@ -107,7 +121,7 @@ def test_get_feature_names_out(sample_data, sample_groups):
     def mean_operation(group_data):
         return np.mean(group_data, axis=1, keepdims=True)
 
-    groups_with_op = GroupedFeatures([3, 3], group_operation=mean_operation)
+    groups_with_op = GroupedFeatures((3, 3), group_operation=mean_operation)
     groups_with_op.fit(sample_data)
     feature_names = groups_with_op.get_feature_names_out()
     assert len(feature_names) == 2
@@ -170,8 +184,8 @@ def test_group_expand(sample_groups):
     # Test with numpy array
     expanded = sample_groups.group_expand(np.array([1.0, 2.0]))
     assert len(expanded) == 6
-    assert all(expanded[:3] == 1.0)
-    assert all(expanded[3:] == 2.0)
+    assert all(x == 1.0 for x in expanded[:3])
+    assert all(x == 2.0 for x in expanded[3:])
 
     # Test invalid inputs
     with pytest.raises(ValueError):
