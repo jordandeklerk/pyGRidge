@@ -83,14 +83,20 @@ def group_lasso(
     group_sizes = np.zeros(num_groups, dtype=int)
     group_weights = np.zeros(num_groups)
 
+    # Scale features by inverse of weights to reduce impact of high-weight features
+    X_scaled = X.copy()
+    for i in range(p):
+        X_scaled[:, i] /= feature_weights[i]
+    
     for i in range(num_groups):
         group_mask = groups == (i + 1)
         group_sizes[i] = np.sum(group_mask)
         index_start[i] = np.where(group_mask)[0][0]
         index_end[i] = np.where(group_mask)[0][-1]
-        group_weights[i] = np.sqrt(np.sum(feature_weights[group_mask]))
+        # Use sqrt of group size for normalization
+        group_weights[i] = np.sqrt(group_sizes[i])
 
-    X_transp_y = X.T @ y
+    X_transp_y = X_scaled.T @ y
 
     iterations = np.zeros(num_intervals, dtype=int)
     lambdas = np.zeros(num_intervals)
@@ -100,9 +106,9 @@ def group_lasso(
         lambda_max = lambda_max_group_lasso(
             y=y,
             groups=groups,
-            feature_weights=feature_weights,
+            feature_weights=np.ones_like(feature_weights),  # Use unit weights since X is already scaled
             beta=beta.copy(),
-            X=X,
+            X=X_scaled,
         )
 
     for interval in range(num_intervals):
@@ -117,7 +123,7 @@ def group_lasso(
 
         while (not accuracy_reached) and (counter <= max_iterations):
             beta_col = beta.reshape(-1, 1)
-            gradient = (X.T @ (X @ beta_col).flatten() - X_transp_y) / n
+            gradient = (X_scaled.T @ (X_scaled @ beta_col).flatten() - X_transp_y) / n
 
             criterion_fulfilled = False
             time_step = 1.0
@@ -137,8 +143,8 @@ def group_lasso(
                         beta_new[start:end] = scaling * temp
 
                 beta_diff = beta - beta_new
-                loss_old = 0.5 * np.sum((y - X @ beta) ** 2) / n
-                loss_new = 0.5 * np.sum((y - X @ beta_new) ** 2) / n
+                loss_old = 0.5 * np.sum((y - X_scaled @ beta) ** 2) / n
+                loss_new = 0.5 * np.sum((y - X_scaled @ beta_new) ** 2) / n
 
                 if loss_new <= loss_old - np.dot(gradient, beta_diff) + (
                     0.5 / time_step
@@ -157,7 +163,9 @@ def group_lasso(
         if trace_progress:
             print(f"Loop: {interval + 1} of {num_intervals} finished.")
 
-        solution[interval] = beta[index_permutation - 1]
+        # Scale coefficients back by feature weights
+        beta_unscaled = beta * feature_weights
+        solution[interval] = beta_unscaled[index_permutation - 1]
         iterations[interval] = counter - 1
         lambdas[interval] = lambda_val
 

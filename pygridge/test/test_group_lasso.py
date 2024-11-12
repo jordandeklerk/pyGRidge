@@ -5,6 +5,7 @@ import pytest
 from numpy.testing import assert_array_almost_equal, assert_array_equal
 from sklearn.utils._testing import assert_raises
 from sklearn.exceptions import NotFittedError
+from sklearn.preprocessing import StandardScaler
 from ..src.group_lasso import GroupLasso, GroupLassoError, ConvergenceError
 
 
@@ -12,8 +13,9 @@ from ..src.group_lasso import GroupLasso, GroupLassoError, ConvergenceError
 def simple_problem():
     """Create a simple problem for testing."""
     X = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+    X = StandardScaler().fit_transform(X)
     y = np.array([1, 2, 3])
-    groups = np.array([1, 1, 2, 2])  # Two groups of two features each
+    groups = np.array([1, 1, 2, 2])  
     return X, y, groups
 
 
@@ -68,7 +70,7 @@ def test_feature_weights(simple_problem):
     """Test custom feature weights."""
     X, y, groups = simple_problem
     feature_weights = np.array([0.5, 0.5, 1.0, 1.0])
-    clf = GroupLasso(groups=groups, feature_weights=feature_weights)
+    clf = GroupLasso(groups=groups, feature_weights=feature_weights, proportion_xi=0.001)
     clf.fit(X, y)
 
     # Features with lower weights should have larger coefficients
