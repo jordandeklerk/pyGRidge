@@ -75,8 +75,6 @@ def group_lasso(
         Dictionary containing the results of the optimization.
     """
     n, p = X.shape
-
-    # Initialize variables
     num_groups = np.max(groups)
     index_start = np.zeros(num_groups, dtype=int)
     index_end = np.zeros(num_groups, dtype=int)
@@ -93,7 +91,6 @@ def group_lasso(
         group_sizes[i] = np.sum(group_mask)
         index_start[i] = np.where(group_mask)[0][0]
         index_end[i] = np.where(group_mask)[0][-1]
-        # Use sqrt of group size for normalization
         group_weights[i] = np.sqrt(group_sizes[i])
 
     X_transp_y = X_scaled.T @ y
@@ -106,7 +103,7 @@ def group_lasso(
         lambda_max = lambda_max_group_lasso(
             y=y,
             groups=groups,
-            feature_weights=np.ones_like(feature_weights),  # Use unit weights since X is already scaled
+            feature_weights=np.ones_like(feature_weights),  
             beta=beta.copy(),
             X=X_scaled,
         )
@@ -324,7 +321,7 @@ class GroupLasso(BaseEstimator, RegressorMixin):
         """
         X, y = check_X_y(X, y, accept_sparse=False)
 
-        n_samples, n_features = X.shape
+        _, n_features = X.shape
 
         if self.feature_weights is None:
             feature_weights = np.ones(n_features)
